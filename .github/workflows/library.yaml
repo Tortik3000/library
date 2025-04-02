@@ -1,0 +1,118 @@
+name: Go CI
+
+on:
+  pull_request
+
+env:
+  ACTIONS_STEP_DEBUG: true
+
+jobs:
+  tests:
+    runs-on: self-hosted
+    timeout-minutes: 18
+    permissions: write-all
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: Check if generated code was not uploaded to repo
+        run: |
+          proto=$(shell find . -type f \( -iname "*.pb.go" -o -iname "*.pb.gw.go" -o -iname "*.pb.validate.go" -o -iname "*.grpc.pb.go" \) ! -path "./integration-test/*" | wc -l | tr -d '[:space:]')
+          if [[ $proto -ne 0 ]]; then
+            echo "Generated files should not be uploaded to repo."
+            echo "Instead, define \"generate\" label in makefile."
+            exit 1
+          fi
+      - name: Setup go
+        uses: actions/setup-go@v5
+        with:
+          go-version: v1.24.0
+          cache-dependency-path: ${{ github.action_path }}/go.sum
+          cache: true
+      - name: Generate code
+        run: |
+          make generate
+          make build
+      - name: Dependencies
+        working-directory: ./
+        run: go mod tidy
+      - name: Linter
+        uses: golangci/golangci-lint-action@v6
+        with:
+          version: v1.64.5
+      - uses: gwatts/go-coverage-action@v2
+        id: coverage
+        with:
+          coverage-threshold: 70
+          fail-coverage: always
+          cover-pkg: ./...
+          cover-mode: count
+          ignore-pattern: |
+            \.pb\.go$
+            .json$
+            _mock\.go$
+            _minimock\.go$
+            generated
+            cmd
+            internal/app
+            db/migrate
+            postgres\.go$
+      - name: Generate unique names
+        run: |
+          UNIQUE_ID=$(echo "${GITHUB_RUN_ID}_$(openssl rand -hex 6)" | sha256sum | cut -c1-12)
+          REPO_NAME=$(basename $GITHUB_REPOSITORY | tr '[:upper:]' '[:lower:]' | tr -c 'a-z0-9' '_')
+          
+          echo "NETWORK_NAME=${REPO_NAME}_network_$UNIQUE_ID" >> $GITHUB_ENV
+          echo "POSTGRES_CONTAINER=postgres_$UNIQUE_ID" >> $GITHUB_ENV
+          echo "TEST_CONTAINER=test_container_$UNIQUE_ID" >> $GITHUB_ENV
+          
+          echo "Generated NETWORK_NAME: ${REPO_NAME}_network_$UNIQUE_ID"
+          echo "Generated POSTGRES_CONTAINER: postgres_$UNIQUE_ID"
+          echo "Generated TEST_CONTAINER: test_container_$UNIQUE_ID"
+      - name: Create Docker Network
+        run: docker network create $NETWORK_NAME
+      - name: Start PostgreSQL Container
+        run: |
+          docker run -d \
+            --name $POSTGRES_CONTAINER \
+            --network $NETWORK_NAME \
+            --network-alias postgres \
+            -e POSTGRES_DB=library \
+            -e POSTGRES_USER=go_student \
+            -e POSTGRES_PASSWORD=1234567 \
+            postgres:16
+      - name: Wait for PostgreSQL to be ready
+        run: |
+          for i in {1..30}; do
+            if docker exec $POSTGRES_CONTAINER pg_isready -U go_student; then
+              echo "PostgreSQL is ready"
+              exit 0
+            fi
+            echo "Waiting for PostgreSQL..."
+            sleep 2
+          done
+          echo "PostgreSQL did not start in time"
+          exit 1
+      - name: Run tests inside Docker
+        run: |
+          docker create --name $TEST_CONTAINER \
+            --network $NETWORK_NAME \
+            -e POSTGRES_HOST=postgres \
+            -e POSTGRES_PORT=5432 \
+            -e POSTGRES_DB=library \
+            -e POSTGRES_USER=go_student \
+            -e POSTGRES_PASSWORD=1234567 \
+            -e POSTGRES_MAX_CONN=10 \
+            golang:1.24 sh -c "sleep infinity"
+          
+          docker cp $(pwd) $TEST_CONTAINER:/app
+          docker start $TEST_CONTAINER
+          docker exec -w /app $TEST_CONTAINER sh -c "go mod tidy && go test -v -race -timeout 5m -tags='integration_test' ./..."
+      - name: Cleanup
+        if: always()
+        run: |
+          docker rm -f $TEST_CONTAINER || true
+          docker stop $POSTGRES_CONTAINER || true
+          docker rm $POSTGRES_CONTAINER || true
+          docker network rm $NETWORK_NAME || true
