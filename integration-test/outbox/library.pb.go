@@ -4,7 +4,7 @@
 // 	protoc        v5.29.3
 // source: api/library/library.proto
 
-package integration_test
+package outbox
 
 import (
 	reflect "reflect"

@@ -19,10 +19,6 @@ func TestConvertErr(t *testing.T) {
 	t.Parallel()
 
 	ctrl := gomock.NewController(t)
-	logger, _ := zap.NewProduction()
-	authorUseCase := mocks.NewMockAuthorUseCase(ctrl)
-	bookUseCase := mocks.NewMockBooksUseCase(ctrl)
-	service := service_.New(logger, bookUseCase, authorUseCase)
 
 	tests := []struct {
 		name     string
@@ -49,6 +45,11 @@ func TestConvertErr(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			t.Parallel()
+
+			logger, _ := zap.NewProduction()
+			authorUseCase := mocks.NewMockAuthorUseCase(ctrl)
+			bookUseCase := mocks.NewMockBooksUseCase(ctrl)
+			service := service_.New(logger, bookUseCase, authorUseCase)
 
 			err := service.ConvertErr(tt.inputErr)
 			s, ok := status.FromError(err)

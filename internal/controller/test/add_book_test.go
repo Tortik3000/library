@@ -21,10 +21,6 @@ import (
 func Test_AddBook(t *testing.T) {
 	t.Parallel()
 	ctrl := gomock.NewController(t)
-	logger, _ := zap.NewProduction()
-	authorUseCase := mocks.NewMockAuthorUseCase(ctrl)
-	bookUseCase := mocks.NewMockBooksUseCase(ctrl)
-	service := controller.New(logger, bookUseCase, authorUseCase)
 	ctx := t.Context()
 
 	type args struct {
@@ -101,6 +97,12 @@ func Test_AddBook(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			t.Parallel()
+
+			logger, _ := zap.NewProduction()
+			authorUseCase := mocks.NewMockAuthorUseCase(ctrl)
+			bookUseCase := mocks.NewMockBooksUseCase(ctrl)
+			service := controller.New(logger, bookUseCase, authorUseCase)
+			
 			if tt.mocksUsed {
 				bookUseCase.EXPECT().AddBook(ctx, tt.args.req.GetName(),
 					tt.args.req.GetAuthorId()).
