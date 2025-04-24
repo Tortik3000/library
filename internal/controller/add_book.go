@@ -11,7 +11,10 @@ import (
 	"github.com/project/library/generated/api/library"
 )
 
-func (i *impl) AddBook(ctx context.Context, req *library.AddBookRequest) (*library.AddBookResponse, error) {
+func (i *impl) AddBook(
+	ctx context.Context,
+	req *library.AddBookRequest,
+) (*library.AddBookResponse, error) {
 	i.logger.Info("Received AddBook request",
 		zap.String("book name", req.GetName()),
 		zap.Strings("author IDs", req.GetAuthorId()))

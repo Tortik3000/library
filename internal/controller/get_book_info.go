@@ -11,8 +11,12 @@ import (
 	"github.com/project/library/generated/api/library"
 )
 
-func (i *impl) GetBookInfo(ctx context.Context, req *library.GetBookInfoRequest) (*library.GetBookInfoResponse, error) {
-	i.logger.Info("Received GetBook request", zap.String("book ID", req.GetId()))
+func (i *impl) GetBookInfo(
+	ctx context.Context,
+	req *library.GetBookInfoRequest,
+) (*library.GetBookInfoResponse, error) {
+	i.logger.Info("Received GetBook request",
+		zap.String("book ID", req.GetId()))
 
 	if err := req.ValidateAll(); err != nil {
 		i.logger.Error("Invalid GetBook request", zap.Error(err))

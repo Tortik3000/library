@@ -10,7 +10,10 @@ import (
 	"github.com/project/library/generated/api/library"
 )
 
-func (i *impl) UpdateBook(ctx context.Context, req *library.UpdateBookRequest) (*library.UpdateBookResponse, error) {
+func (i *impl) UpdateBook(
+	ctx context.Context,
+	req *library.UpdateBookRequest,
+) (*library.UpdateBookResponse, error) {
 	i.logger.Info("Received UpdateBook request",
 		zap.String("book name", req.GetName()),
 		zap.Strings("author IDs", req.GetAuthorIds()),
@@ -21,7 +24,8 @@ func (i *impl) UpdateBook(ctx context.Context, req *library.UpdateBookRequest) (
 		return nil, status.Error(codes.InvalidArgument, err.Error())
 	}
 
-	err := i.booksUseCase.UpdateBook(ctx, req.GetId(), req.GetName(), req.GetAuthorIds())
+	err := i.booksUseCase.UpdateBook(ctx, req.GetId(),
+		req.GetName(), req.GetAuthorIds())
 	if err != nil {
 		i.logger.Error("Failed to update book", zap.Error(err))
 		return nil, i.ConvertErr(err)

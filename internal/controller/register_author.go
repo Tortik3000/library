@@ -10,7 +10,10 @@ import (
 	"github.com/project/library/generated/api/library"
 )
 
-func (i *impl) RegisterAuthor(ctx context.Context, req *library.RegisterAuthorRequest) (*library.RegisterAuthorResponse, error) {
+func (i *impl) RegisterAuthor(
+	ctx context.Context,
+	req *library.RegisterAuthorRequest,
+) (*library.RegisterAuthorResponse, error) {
 	i.logger.Info("Received RegisterAuthor request",
 		zap.String("author name", req.GetName()))
 

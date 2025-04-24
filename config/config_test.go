@@ -3,6 +3,7 @@ package config
 import (
 	"os"
 	"testing"
+	"time"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -17,16 +18,23 @@ func TestNew(t *testing.T) {
 		wantErr    bool
 	}{
 		{
-			name: "ValidConfig",
+			name: "valid config",
 			envVars: map[string]string{
-				"GRPC_PORT":         "50051",
-				"GRPC_GATEWAY_PORT": "8080",
-				"POSTGRES_HOST":     "localhost",
-				"POSTGRES_PORT":     "5432",
-				"POSTGRES_DB":       "testdb",
-				"POSTGRES_USER":     "testuser",
-				"POSTGRES_PASSWORD": "testpassword",
-				"POSTGRES_MAX_CONN": "10",
+				"GRPC_PORT":                 "50051",
+				"GRPC_GATEWAY_PORT":         "8080",
+				"POSTGRES_HOST":             "localhost",
+				"POSTGRES_PORT":             "5432",
+				"POSTGRES_DB":               "testdb",
+				"POSTGRES_USER":             "user",
+				"POSTGRES_PASSWORD":         "password",
+				"POSTGRES_MAX_CONN":         "10",
+				"OUTBOX_ENABLED":            "true",
+				"OUTBOX_WORKERS":            "5",
+				"OUTBOX_BATCH_SIZE":         "100",
+				"OUTBOX_WAIT_TIME_MS":       "500",
+				"OUTBOX_IN_PROGRESS_TTL_MS": "1000",
+				"OUTBOX_BOOK_SEND_URL":      "http://book-service/send",
+				"OUTBOX_AUTHOR_SEND_URL":    "http://author-service/send",
 			},
 			wantConfig: &Config{
 				GRPC: GRPC{
@@ -34,45 +42,75 @@ func TestNew(t *testing.T) {
 					GatewayPort: "8080",
 				},
 				PG: PG{
-					URL:      "postgres://testuser:testpassword@localhost:5432/testdb?sslmode=disable&pool_max_conns=10",
 					Host:     "localhost",
 					Port:     "5432",
 					DB:       "testdb",
-					User:     "testuser",
-					Password: "testpassword",
+					User:     "user",
+					Password: "password",
 					MaxConn:  "10",
+					URL:      "postgres://user:password@localhost:5432/testdb?sslmode=disable&pool_max_conns=10",
+				},
+				Outbox: Outbox{
+					Enabled:         true,
+					Workers:         5,
+					BatchSize:       100,
+					WaitTimeMS:      500 * time.Millisecond,
+					InProgressTTLMS: 1000 * time.Millisecond,
+					BookSendURL:     "http://book-service/send",
+					AuthorSendURL:   "http://author-service/send",
 				},
 			},
 			wantErr: false,
 		},
 		{
-			name: "MissingEnvVars",
+			name: "invalid outbox enabled",
 			envVars: map[string]string{
-				"GRPC_PORT":         "",
-				"GRPC_GATEWAY_PORT": "",
-				"POSTGRES_HOST":     "",
-				"POSTGRES_PORT":     "",
-				"POSTGRES_DB":       "",
-				"POSTGRES_USER":     "",
-				"POSTGRES_PASSWORD": "",
-				"POSTGRES_MAX_CONN": "",
+				"OUTBOX_ENABLED": "invalid",
 			},
-			wantConfig: &Config{
-				GRPC: GRPC{
-					Port:        "9090",
-					GatewayPort: "8080",
-				},
-				PG: PG{
-					URL:      "postgres://user:1234567@localhost:5432/library?sslmode=disable&pool_max_conns=10",
-					Host:     "localhost",
-					Port:     "5432",
-					DB:       "library",
-					User:     "user",
-					Password: "1234567",
-					MaxConn:  "10",
-				},
+			wantConfig: nil,
+			wantErr:    true,
+		},
+		{
+			name: "invalid outbox workers",
+			envVars: map[string]string{
+				"OUTBOX_ENABLED": "true",
+				"OUTBOX_WORKERS": "invalid workers",
 			},
-			wantErr: false,
+			wantConfig: nil,
+			wantErr:    true,
+		},
+		{
+			name: "invalid outbox workers",
+			envVars: map[string]string{
+				"OUTBOX_ENABLED":    "true",
+				"OUTBOX_WORKERS":    "5",
+				"OUTBOX_BATCH_SIZE": "invalid batch size",
+			},
+			wantConfig: nil,
+			wantErr:    true,
+		},
+		{
+			name: "invalid outbox wait time",
+			envVars: map[string]string{
+				"OUTBOX_ENABLED":      "true",
+				"OUTBOX_WORKERS":      "5",
+				"OUTBOX_BATCH_SIZE":   "100",
+				"OUTBOX_WAIT_TIME_MS": "invalid wait time",
+			},
+			wantConfig: nil,
+			wantErr:    true,
+		},
+		{
+			name: "invalid outbox progress TTL",
+			envVars: map[string]string{
+				"OUTBOX_ENABLED":            "true",
+				"OUTBOX_WORKERS":            "5",
+				"OUTBOX_BATCH_SIZE":         "100",
+				"OUTBOX_WAIT_TIME_MS":       "1000",
+				"OUTBOX_IN_PROGRESS_TTL_MS": "invalid progress TTl",
+			},
+			wantConfig: nil,
+			wantErr:    true,
 		},
 	}
 

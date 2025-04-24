@@ -1,6 +1,6 @@
-//go:build integration_test
+//go:build outbox_hw
 
-package integration
+package integration_test
 
 import (
 	"context"
@@ -12,6 +12,7 @@ import (
 	"math/rand/v2"
 	"net"
 	"net/http"
+	"net/http/httptest"
 	"net/url"
 	"os"
 	"os/exec"
@@ -43,6 +44,7 @@ const (
 	authorTableName     = "author"
 	bookTableName       = "book"
 	authorBookTableName = "author_book"
+	outboxTable         = "outbox"
 )
 
 func TestMain(m *testing.M) {
@@ -83,6 +85,630 @@ func cleanUp(t *testing.T) {
 
 	_, err = db.Exec(fmt.Sprintf("TRUNCATE TABLE %s RESTART IDENTITY CASCADE", authorBookTableName))
 	require.NoError(t, err)
+
+	_, err = db.Exec(fmt.Sprintf("TRUNCATE TABLE %s RESTART IDENTITY CASCADE", authorBookTableName))
+	require.NoError(t, err)
+
+	_, err = db.Exec(fmt.Sprintf("TRUNCATE TABLE %s RESTART IDENTITY CASCADE", outboxTable))
+	require.NoError(t, err)
+}
+
+func TestOutboxDuringDownTime(t *testing.T) {
+	ctx := context.Background()
+	executable := getLibraryExecutable(t)
+	grpcPort := findFreePort(t)
+	grpcGatewayPort := findFreePort(t)
+	http.DefaultClient.Timeout = time.Second * 1
+
+	mux := http.NewServeMux()
+
+	const authorPath = "/author"
+	const authorCount = 10
+
+	mux.HandleFunc("POST "+authorPath, func(writer http.ResponseWriter, request *http.Request) {
+		writer.WriteHeader(http.StatusInternalServerError)
+		return
+	})
+
+	const bookPath = "/book"
+	const bookCount = 100
+	mux.HandleFunc("POST "+bookPath, func(writer http.ResponseWriter, request *http.Request) {
+		writer.WriteHeader(http.StatusInternalServerError)
+		return
+	})
+
+	httpTestServer := httptest.NewServer(mux)
+	outboxConf := defaultOutboxConfiguration(
+		httpTestServer.URL+authorPath,
+		httpTestServer.URL+bookPath,
+	)
+
+	outboxConf.WaitTimeMS = 100 * time.Millisecond
+	outboxConf.BatchSize = 2
+	outboxConf.InProgressTTLMS = 1000 * time.Millisecond
+	outboxConf.Workers = 3
+
+	cmd := setupLibrary(t, executable, grpcPort, grpcGatewayPort, outboxConf)
+	t.Cleanup(func() {
+		stopLibrary(t, cmd)
+		cleanUp(t)
+	})
+
+	client := newGRPCClient(t, grpcPort)
+	authorIDs := make([]string, 0, authorCount)
+
+	for i := 0; i < authorCount; i++ {
+		func() {
+			author, err := client.RegisterAuthor(ctx, &RegisterAuthorRequest{
+				Name: "author" + strconv.Itoa(i),
+			})
+			require.NoError(t, err)
+			require.NotEmpty(t, author.GetId())
+
+			authorIDs = append(authorIDs, author.GetId())
+		}()
+	}
+
+	wg := new(sync.WaitGroup)
+	for i := 0; i < bookCount; i++ {
+		wg.Add(1)
+
+		go func() {
+			defer wg.Done()
+
+			book, err := client.AddBook(ctx, &AddBookRequest{
+				Name:      fmt.Sprint(rand.N[int](1e9)),
+				AuthorIds: authorIDs[:rand.N(authorCount/3+1)],
+			})
+
+			require.NoError(t, err)
+			require.NotEmpty(t, book.GetBook().GetId())
+		}()
+	}
+
+	wg.Wait()
+	time.Sleep(time.Second * 5)
+}
+
+func TestNoOpOutbox(t *testing.T) {
+	ctx := context.Background()
+	executable := getLibraryExecutable(t)
+	grpcPort := findFreePort(t)
+	grpcGatewayPort := findFreePort(t)
+	http.DefaultClient.Timeout = time.Second * 1
+
+	mux := http.NewServeMux()
+
+	authorCounter := atomic.Int64{}
+
+	const authorPath = "/author"
+	const authorCount = 10
+	mux.HandleFunc("POST "+authorPath, func(writer http.ResponseWriter, request *http.Request) {
+		authorCounter.Add(1)
+	})
+
+	bookCounter := atomic.Int64{}
+	const bookPath = "/book"
+	const bookCount = 100
+	mux.HandleFunc("POST "+bookPath, func(writer http.ResponseWriter, request *http.Request) {
+		bookCounter.Add(1)
+	})
+
+	httpTestServer := httptest.NewServer(mux)
+	outboxConf := defaultOutboxConfiguration(
+		httpTestServer.URL+authorPath,
+		httpTestServer.URL+bookPath,
+	)
+
+	outboxConf.WaitTimeMS = 10_000_000 * time.Millisecond
+	outboxConf.BatchSize = 20
+	outboxConf.InProgressTTLMS = 10_000_000 * time.Millisecond
+	outboxConf.Workers = 3
+
+	cmd := setupLibrary(t, executable, grpcPort, grpcGatewayPort, outboxConf)
+	t.Cleanup(func() {
+		stopLibrary(t, cmd)
+		cleanUp(t)
+	})
+
+	client := newGRPCClient(t, grpcPort)
+	authorIDs := make([]string, 0, authorCount)
+
+	for i := 0; i < authorCount; i++ {
+		func() {
+			author, err := client.RegisterAuthor(ctx, &RegisterAuthorRequest{
+				Name: "author" + strconv.Itoa(i),
+			})
+			require.NoError(t, err)
+
+			authorIDs = append(authorIDs, author.Id)
+		}()
+	}
+
+	wg := new(sync.WaitGroup)
+	for i := 0; i < bookCount; i++ {
+		wg.Add(1)
+
+		go func() {
+			defer wg.Done()
+
+			_, err := client.AddBook(ctx, &AddBookRequest{
+				Name:      fmt.Sprint(rand.N[int](1e9)),
+				AuthorIds: authorIDs[:rand.N(authorCount/3+1)],
+			})
+			require.NoError(t, err)
+		}()
+	}
+
+	time.Sleep(time.Second * 10)
+
+	require.Equal(t, 0, int(authorCounter.Load()))
+	require.Equal(t, 0, int(bookCounter.Load()))
+}
+
+func TestOutboxRetries(t *testing.T) {
+	ctx := context.Background()
+	executable := getLibraryExecutable(t)
+	grpcPort := findFreePort(t)
+	grpcGatewayPort := findFreePort(t)
+	http.DefaultClient.Timeout = time.Second * 1
+
+	mux := http.NewServeMux()
+
+	authorCounter := atomic.Int64{}
+	authorMx := new(sync.Mutex)
+	authorMap := make(map[string]bool)
+	const authorPath = "/author"
+	const authorCount = 1000
+
+	toggle := atomic.Bool{}
+
+	mux.HandleFunc("POST "+authorPath, func(writer http.ResponseWriter, request *http.Request) {
+		if !toggle.Load() && rand.N[int](2) == 1 {
+			writer.WriteHeader(http.StatusInternalServerError)
+			return
+		}
+
+		authorCounter.Add(1)
+
+		data, err := io.ReadAll(request.Body)
+		require.NoError(t, err)
+
+		authorID := string(data)
+
+		authorMx.Lock()
+		defer authorMx.Unlock()
+
+		authorMap[authorID] = true
+	})
+
+	bookMx := new(sync.Mutex)
+	bookMap := make(map[string]bool)
+	bookCounter := atomic.Int64{}
+	const bookPath = "/book"
+	const bookCount = 100
+	mux.HandleFunc("POST "+bookPath, func(writer http.ResponseWriter, request *http.Request) {
+		if !toggle.Load() && rand.N[int](2) == 1 {
+			writer.WriteHeader(http.StatusInternalServerError)
+			return
+		}
+
+		bookCounter.Add(1)
+
+		data, err := io.ReadAll(request.Body)
+		require.NoError(t, err)
+
+		bookID := string(data)
+
+		bookMx.Lock()
+		defer bookMx.Unlock()
+
+		bookMap[bookID] = true
+	})
+
+	httpTestServer := httptest.NewServer(mux)
+	outboxConf := defaultOutboxConfiguration(
+		httpTestServer.URL+authorPath,
+		httpTestServer.URL+bookPath,
+	)
+
+	outboxConf.WaitTimeMS = 50 * time.Millisecond
+	outboxConf.BatchSize = 20
+	outboxConf.Workers = 5
+	outboxConf.InProgressTTLMS = 1000 * time.Millisecond
+
+	cmd := setupLibrary(t, executable, grpcPort, grpcGatewayPort, outboxConf)
+	t.Cleanup(func() {
+		stopLibrary(t, cmd)
+		cleanUp(t)
+	})
+
+	client := newGRPCClient(t, grpcPort)
+	authorIDs := make([]string, 0, authorCount)
+
+	for i := 0; i < authorCount; i++ {
+		func() {
+			authorMx.Lock()
+			defer authorMx.Unlock()
+
+			registerRes, err := client.RegisterAuthor(ctx, &RegisterAuthorRequest{
+				Name: "author" + strconv.Itoa(i),
+			})
+			require.NoError(t, err)
+
+			authorID := registerRes.GetId()
+			authorIDs = append(authorIDs, authorID)
+
+			v, ok := authorMap[authorID]
+
+			// already deleted
+			if ok && v {
+				return
+			}
+
+			authorMap[authorID] = false
+		}()
+	}
+
+	wg := new(sync.WaitGroup)
+	for i := 0; i < bookCount; i++ {
+		wg.Add(1)
+
+		go func() {
+			defer wg.Done()
+
+			bookMx.Lock()
+			defer bookMx.Unlock()
+
+			book, err := client.AddBook(ctx, &AddBookRequest{
+				Name:      fmt.Sprint(rand.N[int](1e9)),
+				AuthorIds: authorIDs[:rand.N(authorCount/3+1)],
+			})
+			require.NoError(t, err)
+
+			bookID := book.GetBook().GetId()
+			v, ok := bookMap[bookID]
+
+			// already deleted
+			if ok && v {
+				return
+			}
+
+			bookMap[bookID] = false
+		}()
+	}
+
+	wg.Wait()
+	toggle.Store(true)
+	time.Sleep(time.Second * 20)
+
+	authorMx.Lock()
+	defer authorMx.Unlock()
+
+	for _, v := range authorMap {
+		require.True(t, v)
+	}
+
+	bookMx.Lock()
+	defer bookMx.Unlock()
+
+	for _, v := range bookMap {
+		require.True(t, v)
+	}
+
+	require.GreaterOrEqual(t, int(authorCounter.Load()), authorCount)
+	require.GreaterOrEqual(t, int(bookCounter.Load()), bookCount)
+}
+
+func TestOutboxConsistency(t *testing.T) {
+	ctx := context.Background()
+	executable := getLibraryExecutable(t)
+	grpcPort := findFreePort(t)
+	grpcGatewayPort := findFreePort(t)
+	http.DefaultClient.Timeout = time.Second * 1
+
+	mux := http.NewServeMux()
+
+	authorMx := new(sync.Mutex)
+	authorMap := make(map[string]bool)
+	const authorPath = "/author"
+	const authorCount = 100
+	mux.HandleFunc("POST "+authorPath, func(writer http.ResponseWriter, request *http.Request) {
+		data, err := io.ReadAll(request.Body)
+		require.NoError(t, err)
+
+		authorID := string(data)
+
+		authorMx.Lock()
+		defer authorMx.Unlock()
+
+		authorMap[authorID] = true
+	})
+
+	bookMx := new(sync.RWMutex)
+	bookMap := make(map[string]bool)
+	bookCounter := atomic.Int64{}
+	const bookPath = "/book"
+	mux.HandleFunc("POST "+bookPath, func(writer http.ResponseWriter, request *http.Request) {
+		bookCounter.Add(1)
+
+		data, err := io.ReadAll(request.Body)
+		require.NoError(t, err)
+
+		bookID := string(data)
+
+		bookMx.Lock()
+		defer bookMx.Unlock()
+
+		bookMap[bookID] = true
+	})
+
+	httpTestServer := httptest.NewServer(mux)
+	outboxConf := defaultOutboxConfiguration(
+		httpTestServer.URL+authorPath,
+		httpTestServer.URL+bookPath,
+	)
+	outboxConf.BatchSize = 25
+	outboxConf.Workers = 7
+	outboxConf.WaitTimeMS = 100 * time.Millisecond
+	outboxConf.InProgressTTLMS = 1000 * time.Millisecond
+
+	cmd := setupLibrary(t, executable, grpcPort, grpcGatewayPort, outboxConf)
+	t.Cleanup(func() {
+		stopLibrary(t, cmd)
+		cleanUp(t)
+	})
+
+	client := newGRPCClient(t, grpcPort)
+	authorIDs := make([]string, 0, authorCount)
+
+	for i := 0; i < authorCount; i++ {
+		func() {
+			authorMx.Lock()
+			defer authorMx.Unlock()
+
+			registerRes, err := client.RegisterAuthor(ctx, &RegisterAuthorRequest{
+				Name: "author" + strconv.Itoa(i),
+			})
+			require.NoError(t, err)
+
+			authorID := registerRes.GetId()
+			authorIDs = append(authorIDs, authorID)
+		}()
+	}
+
+	wg := new(sync.WaitGroup)
+	errCounter := atomic.Int64{}
+	const iterations = 100
+
+	wg.Add(1)
+	go func() {
+		defer wg.Done()
+
+		for {
+			if t.Failed() {
+				break
+			}
+
+			if errCounter.Load() >= iterations {
+				break
+			}
+
+			select {
+			case <-time.Tick(time.Millisecond * 40):
+				stopLibrary(t, cmd)
+				cmd = setupLibrary(t, executable, grpcPort, grpcGatewayPort, outboxConf)
+			}
+		}
+	}()
+
+	for range runtime.GOMAXPROCS(-1) {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			for {
+				if errCounter.Load() >= iterations {
+					return
+				}
+
+				name := fmt.Sprint(rand.N[int](1e9))
+				addedBook, err := client.AddBook(ctx, &AddBookRequest{
+					Name:      name,
+					AuthorIds: authorIDs[:rand.N(authorCount/3+1)],
+				})
+
+				time.Sleep(time.Millisecond * 50)
+				if err != nil {
+					errCounter.Add(1)
+					continue
+				} else {
+					require.Equal(t, name, addedBook.GetBook().GetName())
+					require.NotEmpty(t, name, addedBook.GetBook().GetId())
+				}
+			}
+		}()
+	}
+
+	wg.Wait()
+	time.Sleep(time.Second * 20)
+
+	checkWg := new(sync.WaitGroup)
+	for _, aID := range authorIDs {
+		checkWg.Add(1)
+		go func() {
+			defer checkWg.Done()
+			bookMx.RLock()
+			defer bookMx.RUnlock()
+
+			if t.Failed() {
+				return
+			}
+
+			books := getAllAuthorBooks(t, aID, client)
+
+			for _, b := range books {
+				v, ok := bookMap[b.GetId()]
+
+				require.NotEmpty(t, b.GetId())
+				require.True(t, ok, b.GetId())
+				require.True(t, v, b.GetId())
+			}
+		}()
+	}
+
+	checkWg.Wait()
+}
+
+func TestOutbox(t *testing.T) {
+	ctx := context.Background()
+	executable := getLibraryExecutable(t)
+	grpcPort := findFreePort(t)
+	grpcGatewayPort := findFreePort(t)
+	http.DefaultClient.Timeout = time.Second * 1
+
+	mux := http.NewServeMux()
+
+	authorCounter := atomic.Int64{}
+	authorMx := new(sync.Mutex)
+	authorMap := make(map[string]bool)
+	const authorPath = "/author"
+	const authorCount = 10
+	mux.HandleFunc("POST "+authorPath, func(writer http.ResponseWriter, request *http.Request) {
+		authorCounter.Add(1)
+
+		data, err := io.ReadAll(request.Body)
+		require.NoError(t, err)
+
+		authorID := string(data)
+
+		authorMx.Lock()
+		defer authorMx.Unlock()
+
+		authorMap[authorID] = true
+	})
+
+	bookMx := new(sync.Mutex)
+	bookMap := make(map[string]bool)
+	bookCounter := atomic.Int64{}
+	const bookPath = "/book"
+	const bookCount = 100
+	mux.HandleFunc("POST "+bookPath, func(writer http.ResponseWriter, request *http.Request) {
+		bookCounter.Add(1)
+
+		data, err := io.ReadAll(request.Body)
+		require.NoError(t, err)
+
+		bookID := string(data)
+
+		bookMx.Lock()
+		defer bookMx.Unlock()
+
+		bookMap[bookID] = true
+	})
+
+	httpTestServer := httptest.NewServer(mux)
+	outboxConf := defaultOutboxConfiguration(
+		httpTestServer.URL+authorPath,
+		httpTestServer.URL+bookPath,
+	)
+
+	outboxConf.WaitTimeMS = 100 * time.Millisecond
+	outboxConf.BatchSize = 20
+	outboxConf.InProgressTTLMS = time.Millisecond * 1_000_000
+	outboxConf.Workers = 3
+
+	cmd := setupLibrary(t, executable, grpcPort, grpcGatewayPort, outboxConf)
+	t.Cleanup(func() {
+		stopLibrary(t, cmd)
+		cleanUp(t)
+	})
+
+	client := newGRPCClient(t, grpcPort)
+	authorIDs := make([]string, 0, authorCount)
+
+	for i := 0; i < authorCount; i++ {
+		func() {
+			authorMx.Lock()
+			defer authorMx.Unlock()
+
+			registerRes, err := client.RegisterAuthor(ctx, &RegisterAuthorRequest{
+				Name: "author" + strconv.Itoa(i),
+			})
+			require.NoError(t, err)
+
+			authorID := registerRes.GetId()
+			authorIDs = append(authorIDs, authorID)
+
+			v, ok := authorMap[authorID]
+
+			// already deleted
+			if ok && v {
+				return
+			}
+
+			authorMap[authorID] = false
+			time.Sleep(time.Millisecond * 100)
+		}()
+	}
+
+	wg := new(sync.WaitGroup)
+	for i := 0; i < bookCount; i++ {
+		wg.Add(1)
+
+		go func() {
+			defer wg.Done()
+
+			bookMx.Lock()
+			defer bookMx.Unlock()
+
+			book, err := client.AddBook(ctx, &AddBookRequest{
+				Name:      fmt.Sprint(rand.N[int](1e9)),
+				AuthorIds: authorIDs[:rand.N(authorCount/3+1)],
+			})
+			require.NoError(t, err)
+
+			bookID := book.GetBook().GetId()
+			v, ok := bookMap[bookID]
+
+			// already deleted
+			if ok && v {
+				return
+			}
+
+			bookMap[bookID] = false
+			time.Sleep(time.Millisecond * 100)
+		}()
+	}
+
+	time.Sleep(time.Second * 15)
+
+	authorMx.Lock()
+	defer authorMx.Unlock()
+
+	for _, v := range authorMap {
+		require.True(t, v)
+	}
+
+	bookMx.Lock()
+	defer bookMx.Unlock()
+
+	for _, v := range bookMap {
+		require.True(t, v)
+	}
+
+	require.Equal(t, authorCount, int(authorCounter.Load()))
+	require.Equal(t, bookCount, int(bookCounter.Load()))
+}
+
+func defaultOutboxConfiguration(authorURL, bookURL string) *outBoxConfiguration {
+	return &outBoxConfiguration{
+		Workers:         2,
+		BatchSize:       2,
+		WaitTimeMS:      time.Millisecond * 3000,
+		InProgressTTLMS: time.Millisecond * 10000,
+		AuthorSendURL:   authorURL,
+		BookSendURL:     bookURL,
+	}
 }
 
 func TestLibraryConsistency(t *testing.T) {
@@ -94,7 +720,7 @@ func TestLibraryConsistency(t *testing.T) {
 
 	http.DefaultClient.Timeout = time.Second * 1
 
-	cmd := setupLibrary(t, executable, grpcPort, grpcGatewayPort)
+	cmd := setupLibrary(t, executable, grpcPort, grpcGatewayPort, nil)
 	t.Cleanup(func() {
 		stopLibrary(t, cmd)
 		cleanUp(t)
@@ -188,7 +814,6 @@ func TestLibraryConsistency(t *testing.T) {
 				})
 
 				if err != nil {
-					fmt.Println(errCounter.Load())
 					errCounter.Add(1)
 					time.Sleep(time.Millisecond * 300)
 				}
@@ -212,7 +837,7 @@ func TestLibraryConsistency(t *testing.T) {
 			select {
 			case <-time.Tick(time.Millisecond * 500):
 				stopLibrary(t, cmd)
-				cmd = setupLibrary(t, executable, grpcPort, grpcGatewayPort)
+				cmd = setupLibrary(t, executable, grpcPort, grpcGatewayPort, nil)
 			}
 		}
 	}()
@@ -228,7 +853,7 @@ func TestLibraryWithoutInMemoryInvariant(t *testing.T) {
 
 	http.DefaultClient.Timeout = time.Second * 1
 
-	cmd := setupLibrary(t, executable, grpcPort, grpcGatewayPort)
+	cmd := setupLibrary(t, executable, grpcPort, grpcGatewayPort, nil)
 	t.Cleanup(func() {
 		stopLibrary(t, cmd)
 		cleanUp(t)
@@ -266,7 +891,7 @@ func TestLibraryWithoutInMemoryInvariant(t *testing.T) {
 		require.NoError(t, err)
 
 		stopLibrary(t, cmd)
-		cmd = setupLibrary(t, executable, grpcPort, grpcGatewayPort)
+		cmd = setupLibrary(t, executable, grpcPort, grpcGatewayPort, nil)
 
 		newAuthor, err := client.GetAuthorInfo(ctx, &GetAuthorInfoRequest{
 			Id: authorID,
@@ -295,12 +920,13 @@ func TestLibraryWithoutInMemoryInvariant(t *testing.T) {
 		})
 
 		stopLibrary(t, cmd)
-		cmd = setupLibrary(t, executable, grpcPort, grpcGatewayPort)
+		cmd = setupLibrary(t, executable, grpcPort, grpcGatewayPort, nil)
 
 		require.NoError(t, err)
 		authorID := registerRes.GetId()
 
 		createdTime := time.Now()
+		time.Sleep(time.Second)
 		response, err := client.AddBook(ctx, &AddBookRequest{
 			Name:      bookName,
 			AuthorIds: []string{authorID},
@@ -831,7 +1457,7 @@ func getLibraryExecutable(t *testing.T) string {
 	wd, err := os.Getwd()
 	require.NoError(t, err)
 
-	binaryPath, err := resolveFilePath(filepath.Dir(wd), "library")
+	binaryPath, err := resolveFilePath(filepath.Dir(filepath.Dir(wd)), "library")
 	require.NoError(t, err, "you need to compile your library service, run make build")
 
 	return binaryPath
@@ -841,11 +1467,22 @@ var requiredEnv = []string{"POSTGRES_HOST", "POSTGRES_PORT", "POSTGRES_DB", "POS
 
 //var requiredEnv = make([]string, 0)
 
+type outBoxConfiguration struct {
+	Enabled         bool          `env:"OUTBOX_ENABLED"`
+	Workers         int           `env:"OUTBOX_WORKERS"`
+	BatchSize       int           `env:"OUTBOX_BATCH_SIZE"`
+	WaitTimeMS      time.Duration `env:"OUTBOX_WAIT_TIME_MS"`
+	InProgressTTLMS time.Duration `env:"OUTBOX_IN_PROGRESS_TTL_MS"`
+	AuthorSendURL   string        `env:"OUTBOX_AUTHOR_SEND_URL"`
+	BookSendURL     string        `env:"OUTBOX_BOOK_SEND_URL"`
+}
+
 func setupLibrary(
 	t *testing.T,
 	executable string,
 	grpcPort string,
 	grpcGatewayPort string,
+	outboxCfg *outBoxConfiguration,
 ) *exec.Cmd {
 	t.Helper()
 
@@ -862,6 +1499,19 @@ func setupLibrary(
 
 	cmd.Env = append(cmd.Env, "GRPC_PORT="+grpcPort)
 	cmd.Env = append(cmd.Env, "GRPC_GATEWAY_PORT="+grpcGatewayPort)
+
+	if outboxCfg == nil {
+		cmd.Env = append(cmd.Env, "OUTBOX_ENABLED=false")
+	} else {
+		cmd.Env = append(cmd.Env, "OUTBOX_ENABLED=true")
+
+		cmd.Env = append(cmd.Env, "OUTBOX_WORKERS="+fmt.Sprint(outboxCfg.Workers))
+		cmd.Env = append(cmd.Env, "OUTBOX_BATCH_SIZE="+fmt.Sprint(outboxCfg.BatchSize))
+		cmd.Env = append(cmd.Env, "OUTBOX_WAIT_TIME_MS="+fmt.Sprint(outboxCfg.WaitTimeMS.Milliseconds()))
+		cmd.Env = append(cmd.Env, "OUTBOX_IN_PROGRESS_TTL_MS="+fmt.Sprint(outboxCfg.InProgressTTLMS.Milliseconds()))
+		cmd.Env = append(cmd.Env, "OUTBOX_AUTHOR_SEND_URL="+outboxCfg.AuthorSendURL)
+		cmd.Env = append(cmd.Env, "OUTBOX_BOOK_SEND_URL="+outboxCfg.BookSendURL)
+	}
 
 	require.NoError(t, cmd.Start())
 	grpcClient := newGRPCClient(t, grpcPort)

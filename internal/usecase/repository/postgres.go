@@ -8,7 +8,6 @@ import (
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgconn"
-	"github.com/jackc/pgx/v5/pgxpool"
 	"go.uber.org/zap"
 
 	"github.com/project/library/internal/entity"
@@ -20,55 +19,57 @@ var _ BooksRepository = (*postgresRepository)(nil)
 var ErrForeignKeyViolation = &pgconn.PgError{Code: "23503"}
 
 type postgresRepository struct {
-	db     *pgxpool.Pool
+	db     PgxIface
 	logger *zap.Logger
 }
 
-func NewPostgresRepository(db *pgxpool.Pool, logger *zap.Logger) *postgresRepository {
+func NewPostgresRepository(
+	db PgxIface,
+	logger *zap.Logger,
+) *postgresRepository {
 	return &postgresRepository{
 		db:     db,
 		logger: logger,
 	}
 }
 
-func (p *postgresRepository) AddBook(ctx context.Context, book *entity.Book) (*entity.Book, error) {
-	tx, err := p.db.Begin(ctx)
+func (p *postgresRepository) AddBook(
+	ctx context.Context,
+	book *entity.Book,
+) (respBook *entity.Book, txErr error) {
+	tx, rollback, err := p.beginTx(ctx)
 	if err != nil {
-		return &entity.Book{}, err
+		return nil, err
 	}
+	defer rollback(txErr)
 
-	defer p.rollbackTx(ctx, tx)
-
-	const insertQueryBook = `
+	const insertBook = `
 INSERT INTO book (name)
 VALUES ($1)
 RETURNING id, created_at, updated_at;
 `
 
 	id := uuid.UUID{}
-	err = tx.QueryRow(ctx, insertQueryBook, book.Name).Scan(&id, &book.CreatedAt, &book.UpdatedAt)
+	err = tx.QueryRow(ctx, insertBook, book.Name).Scan(
+		&id, &book.CreatedAt, &book.UpdatedAt)
 	if err != nil {
-		return &entity.Book{}, err
+		return nil, err
 	}
 	book.ID = id.String()
 
 	err = bulkInsertInAuthorBook(ctx, book.AuthorIDs, book.ID, tx)
 	if err != nil {
-		if errors.As(err, &ErrForeignKeyViolation) {
-			return &entity.Book{}, entity.ErrAuthorNotFound
-		}
-		return &entity.Book{}, err
-	}
-
-	if err = tx.Commit(ctx); err != nil {
-		return &entity.Book{}, err
+		return nil, mapPostgresError(err, entity.ErrAuthorNotFound)
 	}
 
 	return book, nil
 }
 
-func (p *postgresRepository) GetBook(ctx context.Context, bookID string) (*entity.Book, error) {
-	const GetQueryBook = `
+func (p *postgresRepository) GetBook(
+	ctx context.Context,
+	bookID string,
+) (*entity.Book, error) {
+	const GetBook = `
 SELECT 
   book.id, 
   book.name, 
@@ -84,99 +85,89 @@ WHERE
 GROUP BY 
   book.id;
 `
-
 	var book entity.Book
 	var authorIDs []uuid.UUID
-	err := p.db.QueryRow(ctx, GetQueryBook, bookID).
-		Scan(&book.ID, &book.Name, &book.CreatedAt, &book.UpdatedAt, &authorIDs)
-	if errors.Is(err, sql.ErrNoRows) {
-		return &entity.Book{}, entity.ErrBookNotFound
-	}
+
+	err := p.db.QueryRow(ctx, GetBook, bookID).Scan(&book.ID,
+		&book.Name, &book.CreatedAt, &book.UpdatedAt, &authorIDs)
+
 	if err != nil {
-		return &entity.Book{}, err
+		return nil, mapPostgresError(err, entity.ErrBookNotFound)
 	}
 
 	book.AuthorIDs = convertUUIDsToStrings(authorIDs)
 	return &book, nil
 }
 
-func (p *postgresRepository) UpdateBook(ctx context.Context, bookID string, newBookName string, authorIDs []string) error {
-	tx, err := p.db.Begin(ctx)
+func (p *postgresRepository) UpdateBook(
+	ctx context.Context,
+	bookID string,
+	newBookName string,
+	authorIDs []string,
+) (txErr error) {
+	tx, rollback, err := p.beginTx(ctx)
 	if err != nil {
 		return err
 	}
+	defer rollback(txErr)
 
-	defer p.rollbackTx(ctx, tx)
-
-	const UpdateQueryBook = `
+	const UpdateBook = `
 UPDATE book SET name = $1 WHERE id = $2;
 `
 
-	_, err = tx.Exec(ctx, UpdateQueryBook, newBookName, bookID)
+	_, err = tx.Exec(ctx, UpdateBook, newBookName, bookID)
 	if err != nil {
 		return err
 	}
 
-	const insert = `
-        INSERT INTO author_book (author_id, book_id)
-        SELECT unnest($1::uuid[]), $2
-        ON CONFLICT (author_id, book_id) DO NOTHING;
-    `
-	_, err = tx.Exec(ctx, insert, authorIDs, bookID)
+	const UpdateAuthorBooks = `
+WITH inserted AS (
+	INSERT INTO author_book (author_id, book_id)
+	SELECT unnest($1::uuid[]), $2
+	ON CONFLICT (author_id, book_id) DO NOTHING
+)
+DELETE FROM author_book
+WHERE book_id = $2
+  AND author_id NOT IN (SELECT unnest($1::uuid[]));
+`
+
+	_, err = tx.Exec(ctx, UpdateAuthorBooks, authorIDs, bookID)
 	if err != nil {
-		if errors.As(err, &ErrForeignKeyViolation) {
-			return entity.ErrAuthorNotFound
-		}
-		return err
-	}
-
-	const DeleteQueryFromAuthorBooks = `
-	  DELETE FROM author_book
-	  WHERE book_id = $1
-	  AND author_id NOT IN (SELECT unnest($2::uuid[]));
-	`
-
-	_, err = tx.Exec(ctx, DeleteQueryFromAuthorBooks, bookID, authorIDs)
-	if err != nil {
-		return err
-	}
-
-	if err = tx.Commit(ctx); err != nil {
-		return err
+		return mapPostgresError(err, entity.ErrAuthorNotFound)
 	}
 
 	return nil
 }
 
-func (p *postgresRepository) RegisterAuthor(ctx context.Context, author *entity.Author) (*entity.Author, error) {
-	tx, err := p.db.Begin(ctx)
+func (p *postgresRepository) RegisterAuthor(
+	ctx context.Context,
+	author *entity.Author,
+) (respAuthor *entity.Author, txErr error) {
+	tx, rollback, err := p.beginTx(ctx)
 	if err != nil {
-		return &entity.Author{}, err
+		return nil, err
 	}
+	defer rollback(txErr)
 
-	defer p.rollbackTx(ctx, tx)
-
-	const InsertQueryAuthor = `
+	const InsertAuthor = `
 INSERT INTO author ( name)
 VALUES ($1)
 RETURNING id;
 `
-
 	id := uuid.UUID{}
-	err = tx.QueryRow(ctx, InsertQueryAuthor, author.Name).Scan(&id)
+	err = tx.QueryRow(ctx, InsertAuthor, author.Name).Scan(&id)
 	if err != nil {
-		return &entity.Author{}, err
+		return nil, err
 	}
 	author.ID = id.String()
-
-	if err = tx.Commit(ctx); err != nil {
-		return &entity.Author{}, err
-	}
 
 	return author, nil
 }
 
-func (p *postgresRepository) GetAuthorInfo(ctx context.Context, authorID string) (*entity.Author, error) {
+func (p *postgresRepository) GetAuthorInfo(
+	ctx context.Context,
+	authorID string,
+) (*entity.Author, error) {
 	const GetQueryAuthor = `
 SELECT id, name
 FROM author
@@ -186,107 +177,122 @@ WHERE id = $1;
 	var author entity.Author
 	err := p.db.QueryRow(ctx, GetQueryAuthor, authorID).
 		Scan(&author.ID, &author.Name)
-	if errors.Is(err, sql.ErrNoRows) {
-		return &entity.Author{}, entity.ErrAuthorNotFound
-	}
 	if err != nil {
-		return &entity.Author{}, err
+		return nil, mapPostgresError(err, entity.ErrAuthorNotFound)
 	}
 
 	return &author, nil
 }
 
-func (p *postgresRepository) ChangeAuthor(ctx context.Context, authorID string, newAuthorName string) error {
-	tx, err := p.db.Begin(ctx)
+func (p *postgresRepository) ChangeAuthor(
+	ctx context.Context,
+	authorID string,
+	newAuthorName string,
+) (txErr error) {
+	tx, rollback, err := p.beginTx(ctx)
 	if err != nil {
 		return err
 	}
+	defer rollback(txErr)
 
-	defer p.rollbackTx(ctx, tx)
-
-	const UpdateQueryAuthor = `
+	const UpdateAuthor = `
 UPDATE author SET name = $1 WHERE id = $2;
 `
 
-	_, err = tx.Exec(ctx, UpdateQueryAuthor, newAuthorName, authorID)
+	_, err = tx.Exec(ctx, UpdateAuthor, newAuthorName, authorID)
 	if err != nil {
-		return err
-	}
-
-	if err = tx.Commit(ctx); err != nil {
 		return err
 	}
 
 	return nil
 }
 
-func (p *postgresRepository) GetAuthorBooks(ctx context.Context, authorID string) ([]*entity.Book, error) {
-	res := make([]*entity.Book, 0)
-
-	const GetQueryBooks = `
+func (p *postgresRepository) GetAuthorBooks(
+	ctx context.Context,
+	authorID string,
+) ([]*entity.Book, error) {
+	const GetBooksWithAuthors = `
 SELECT
-  book.id,
-  book.name,
-  book.created_at,
-  book.updated_at
-FROM author_book
-INNER JOIN book
-ON author_book.book_id = book.id
-WHERE author_book.author_id = $1;
+	book.id,
+	book.name,
+	book.created_at,
+	book.updated_at,
+	array_agg(author_book.author_id)
+FROM
+	book
+LEFT JOIN
+	author_book ON book.id = author_book.book_id
+WHERE
+	book.id IN (
+		SELECT book_id
+		FROM author_book
+		WHERE author_id = $1
+	)
+GROUP BY
+	book.id;
 `
-	booksRows, err := p.db.Query(ctx, GetQueryBooks, authorID)
-	if err != nil {
-		return res, err
-	}
-	defer booksRows.Close()
 
-	for booksRows.Next() {
-		var book entity.Book
-
-		if err := booksRows.Scan(&book.ID, &book.Name, &book.CreatedAt, &book.UpdatedAt); err != nil {
-			return res, err
-		}
-		res = append(res, &book)
-	}
-
-	for _, book := range res {
-		authors, err := p.getBookAuthors(ctx, book.ID)
-		if err != nil {
-			return res, err
-		}
-		book.AuthorIDs = authors
-	}
-
-	return res, nil
-}
-
-func (p *postgresRepository) getBookAuthors(ctx context.Context, bookID string) ([]string, error) {
-	const GetQueryAuthors = `
-	SELECT array_agg(author_id)
-	FROM author_book
-	WHERE book_id = $1;
-	`
-	var authorIDs []uuid.UUID
-	err := p.db.QueryRow(ctx, GetQueryAuthors, bookID).Scan(&authorIDs)
+	rows, err := p.db.Query(ctx, GetBooksWithAuthors, authorID)
 	if err != nil {
 		return nil, err
 	}
+	defer rows.Close()
 
-	authors := convertUUIDsToStrings(authorIDs)
-	return authors, nil
-}
+	books := make([]*entity.Book, 0)
+	for rows.Next() {
+		var book entity.Book
+		var authorIDs []uuid.UUID
 
-func (p *postgresRepository) rollbackTx(ctx context.Context, tx pgx.Tx) {
-	err := tx.Rollback(ctx)
-	if err != nil {
-		p.logger.Debug("failed to rollback transaction", zap.Error(err))
+		if err = rows.Scan(&book.ID, &book.Name, &book.CreatedAt,
+			&book.UpdatedAt, &authorIDs); err != nil {
+			return nil, err
+		}
+
+		book.AuthorIDs = convertUUIDsToStrings(authorIDs)
+		books = append(books, &book)
 	}
+
+	return books, nil
 }
 
-func bulkInsertInAuthorBook(ctx context.Context, authorIDs []string, bookID string, tx pgx.Tx) error {
-	rows := make([][]interface{}, len(authorIDs))
+func (p *postgresRepository) beginTx(
+	ctx context.Context,
+) (pgx.Tx, func(txErr error), error) {
+	rollbackFunc := func(error) {}
+
+	tx, err := extractTx(ctx)
+	if err != nil {
+		tx, err = p.db.Begin(ctx)
+		if err != nil {
+			return nil, nil, err
+		}
+
+		rollbackFunc = func(txErr error) {
+			if txErr != nil {
+				err := tx.Rollback(ctx)
+				if err != nil {
+					p.logger.Debug("failed to rollback transaction", zap.Error(err))
+				}
+				return
+			}
+			err := tx.Commit(ctx)
+			if err != nil {
+				p.logger.Debug("failed to commit transaction", zap.Error(err))
+			}
+		}
+	}
+
+	return tx, rollbackFunc, nil
+}
+
+func bulkInsertInAuthorBook(
+	ctx context.Context,
+	authorIDs []string,
+	bookID string,
+	tx pgx.Tx) error {
+	rows := make([][]any, len(authorIDs))
 	for i, authorID := range authorIDs {
-		rows[i] = []interface{}{authorID, bookID}
+		rows[i] = []any{authorID, bookID}
 	}
 
 	_, err := tx.CopyFrom(
@@ -307,4 +313,14 @@ func convertUUIDsToStrings(uuids []uuid.UUID) []string {
 		strs = make([]string, 0)
 	}
 	return strs
+}
+
+func mapPostgresError(err error, notFoundErr error) error {
+	if errors.Is(err, sql.ErrNoRows) {
+		return notFoundErr
+	}
+	if errors.As(err, &ErrForeignKeyViolation) {
+		return notFoundErr
+	}
+	return err
 }

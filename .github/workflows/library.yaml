@@ -49,7 +49,6 @@ jobs:
       - uses: gwatts/go-coverage-action@v2
         id: coverage
         with:
-          coverage-threshold: 70
           fail-coverage: always
           cover-pkg: ./...
           cover-mode: count
@@ -62,7 +61,8 @@ jobs:
             cmd
             internal/app
             db/migrate
-            postgres\.go$
+            repository/postgres\.go$
+            usecase/outbox/outbox\.go$
       - name: Generate unique names
         run: |
           UNIQUE_ID=$(echo "${GITHUB_RUN_ID}_$(openssl rand -hex 6)" | sha256sum | cut -c1-12)

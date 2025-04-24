@@ -10,9 +10,12 @@ import (
 	"github.com/project/library/generated/api/library"
 )
 
-func (i *impl) GetAuthorInfo(ctx context.Context, req *library.GetAuthorInfoRequest) (*library.GetAuthorInfoResponse, error) {
+func (i *impl) GetAuthorInfo(
+	ctx context.Context,
+	req *library.GetAuthorInfoRequest,
+) (*library.GetAuthorInfoResponse, error) {
 	i.logger.Info("Received GetAuthor request",
-		zap.String("authorI d", req.GetId()))
+		zap.String("authorId", req.GetId()))
 
 	if err := req.ValidateAll(); err != nil {
 		i.logger.Error("Invalid GetAuthor request", zap.Error(err))

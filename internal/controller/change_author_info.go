@@ -10,7 +10,10 @@ import (
 	"github.com/project/library/generated/api/library"
 )
 
-func (i *impl) ChangeAuthorInfo(ctx context.Context, req *library.ChangeAuthorInfoRequest) (*library.ChangeAuthorInfoResponse, error) {
+func (i *impl) ChangeAuthorInfo(
+	ctx context.Context,
+	req *library.ChangeAuthorInfoRequest,
+) (*library.ChangeAuthorInfoResponse, error) {
 	i.logger.Info("Received ChangeAuthor request",
 		zap.String("new author name", req.GetName()),
 		zap.String("author ID", req.GetId()))

@@ -3,9 +3,10 @@ package library
 import (
 	"context"
 
+	"go.uber.org/zap"
+
 	"github.com/project/library/internal/entity"
 	"github.com/project/library/internal/usecase/repository"
-	"go.uber.org/zap"
 )
 
 //go:generate mockgen_uber -source=interfaces.go -destination=mocks/library_mock.go -package=mocks
@@ -32,16 +33,22 @@ type libraryImpl struct {
 	logger           *zap.Logger
 	authorRepository repository.AuthorRepository
 	booksRepository  repository.BooksRepository
+	outboxRepository repository.OutboxRepository
+	transactor       repository.Transactor
 }
 
 func New(
 	logger *zap.Logger,
 	authorRepository repository.AuthorRepository,
 	booksRepository repository.BooksRepository,
+	outboxRepository repository.OutboxRepository,
+	transactor repository.Transactor,
 ) *libraryImpl {
 	return &libraryImpl{
 		logger:           logger,
 		authorRepository: authorRepository,
 		booksRepository:  booksRepository,
+		outboxRepository: outboxRepository,
+		transactor:       transactor,
 	}
 }

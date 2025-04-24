@@ -17,12 +17,12 @@ func SetupPostgres(pool *pgxpool.Pool, logger *zap.Logger) {
 	goose.SetBaseFS(embedMigrations)
 	if err := goose.SetDialect("postgres"); err != nil {
 		logger.Error("can not set dialect in goose", zap.Error(err))
-		os.Exit(-1)
+		os.Exit(1)
 	}
 
 	db := stdlib.OpenDBFromPool(pool)
 	if err := goose.Up(db, "migrations"); err != nil {
 		logger.Error("can not setup migrations", zap.Error(err))
-		os.Exit(-1)
+		os.Exit(1)
 	}
 }

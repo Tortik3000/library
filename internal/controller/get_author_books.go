@@ -11,7 +11,10 @@ import (
 	"github.com/project/library/generated/api/library"
 )
 
-func (i *impl) GetAuthorBooks(req *library.GetAuthorBooksRequest, server library.Library_GetAuthorBooksServer) error {
+func (i *impl) GetAuthorBooks(
+	req *library.GetAuthorBooksRequest,
+	server library.Library_GetAuthorBooksServer,
+) error {
 	i.logger.Info("Received GetAuthorBooks request",
 		zap.String("author Id", req.GetAuthorId()))
 
@@ -20,7 +23,8 @@ func (i *impl) GetAuthorBooks(req *library.GetAuthorBooksRequest, server library
 		return status.Error(codes.InvalidArgument, err.Error())
 	}
 
-	books, err := i.authorUseCase.GetAuthorBooks(context.Background(), req.GetAuthorId())
+	books, err := i.authorUseCase.GetAuthorBooks(
+		context.Background(), req.GetAuthorId())
 	if err != nil {
 		i.logger.Error("Failed to get author books", zap.Error(err))
 		return i.ConvertErr(err)
