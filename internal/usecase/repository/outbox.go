@@ -3,6 +3,7 @@ package repository
 import (
 	"context"
 	"fmt"
+	"go.opentelemetry.io/otel/trace"
 	"time"
 
 	"github.com/jackc/pgx/v5"
@@ -29,6 +30,12 @@ func (o *outboxRepository) SendMessage(
 	kind OutboxKind,
 	message []byte,
 ) error {
+	span := trace.SpanFromContext(ctx)
+	o.logger.Info("start to send message",
+		zap.String("layer", "outbox"),
+		zap.String("trace_id", span.SpanContext().TraceID().String()),
+	)
+
 	const query = `
 INSERT INTO outbox (idempotency_key, data, status, kind)
 VALUES($1, $2, 'CREATED', $3)
@@ -42,8 +49,14 @@ ON CONFLICT (idempotency_key) DO NOTHING`
 	}
 
 	if err != nil {
+		span.RecordError(err)
 		return err
 	}
+
+	o.logger.Info("finish to send message",
+		zap.String("layer", "outbox"),
+		zap.String("trace_id", span.SpanContext().TraceID().String()),
+	)
 
 	return nil
 }

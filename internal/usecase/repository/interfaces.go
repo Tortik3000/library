@@ -63,7 +63,7 @@ func (o OutboxKind) String() string {
 	case OutboxKindBook:
 		return "book"
 	case OutboxKindAuthor:
-		return "auhtor"
+		return "author"
 	default:
 		return "undefined"
 	}

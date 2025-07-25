@@ -12,7 +12,7 @@ UNAME_P := $(shell uname -p)
 ARCH :=
 
 ifeq ($(UNAME_S),Linux)
-    INSTALL_CMD = sudo -S apt install -y protobuf-compiler
+    INSTALL_CMD = apt update && apt install -y protobuf-compiler
     ARCH = linux-x86_64
 endif
 
@@ -42,6 +42,37 @@ test:
 	echo 'Running tests...'
 	${GO_TEST} ${GO_TEST_ARGS}
 
+.PHONY: update
+update:
+	@if [ -n "$(shell git status --untracked-files=no --porcelain)" ]; then \
+		echo 'You have some changes. Please commit, checkout or stash them.'; \
+		exit 1; \
+	fi
+	@current_branch=$$(git branch --show-current); \
+	echo "Current branch: $$current_branch"; \
+	git checkout main; \
+	git pull; \
+	for branch in $$(git branch | sed 's/^[* ]*//'); do \
+		git checkout $$branch; \
+		if ! git rev-parse --symbolic-full-name @{u} >/dev/null 2>&1; then \
+			branch_exists=$$(git ls-remote --heads origin $$branch); \
+			if [ -n "$$branch_exists" ]; then \
+				echo "Upstream exists for $$branch. Setting upstream to origin/$$branch."; \
+				git branch --set-upstream-to=origin/$$branch; \
+			else \
+				echo "Upstream not found for $$branch. Pushing and setting upstream to origin/$$branch."; \
+				git push --set-upstream origin $$branch; \
+				git branch --set-upstream-to=origin/$$branch; \
+			fi; \
+		fi; \
+		git pull --rebase; \
+		git push -f; \
+		git rebase main; \
+		git push -f; \
+	done; \
+	git checkout $$current_branch; \
+	echo 'Successfully updated'
+
 .install-protoc:
 	$(INSTALL_CMD)
 
@@ -53,7 +84,7 @@ bin-deps: .bin-deps
 	GOBIN=$(LOCAL_BIN) go install github.com/rakyll/gotest@v0.0.6 && \
 	GOBIN=$(LOCAL_BIN) go install go.uber.org/mock/mockgen@latest && \
 	mv $(LOCAL_BIN)/mockgen $(LOCAL_BIN)/mockgen_uber
-	go install github.com/easyp-tech/easyp/cmd/easyp@latest && \
+	go install github.com/easyp-tech/easyp/cmd/easyp@v0.7.11 && \
 	go install github.com/grpc-ecosystem/grpc-gateway/v2/protoc-gen-grpc-gateway@v2.18.1 && \
 	go install github.com/grpc-ecosystem/grpc-gateway/v2/protoc-gen-openapiv2@v2.18.1 && \
 	go install google.golang.org/protobuf/cmd/protoc-gen-go@v1.28.1 && \
@@ -65,7 +96,7 @@ bin-deps: .bin-deps
 	rm -rf ./bin
 	mkdir -p ./bin
 
-generate: bin-deps .generate build
+generate: bin-deps .generate
 fast-generate: .generate
 
 .generate:
@@ -78,7 +109,6 @@ fast-generate: .generate
 	mkdir -p ./docs/spec
 
 	rm -rf ~/.easyp/
-
 
 	(PATH="$(PATH):$(LOCAL_BIN)" && go generate ./...)
 	(PATH="$(PATH):$(LOCAL_BIN)" && $(EASYP_BIN) mod download && $(EASYP_BIN) generate)

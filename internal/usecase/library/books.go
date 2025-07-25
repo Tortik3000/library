@@ -3,6 +3,10 @@ package library
 import (
 	"context"
 	"encoding/json"
+	"fmt"
+
+	"go.opentelemetry.io/otel/attribute"
+	"go.opentelemetry.io/otel/trace"
 
 	"go.uber.org/zap"
 
@@ -15,10 +19,18 @@ func (l *libraryImpl) AddBook(
 	name string,
 	authorIDs []string,
 ) (*entity.Book, error) {
+	span := trace.SpanFromContext(ctx)
+	l.logger.Info("start to add book",
+		zap.String("layer", "use_case_library"),
+		zap.String("trace_id", span.SpanContext().TraceID().String()),
+	)
+
 	var book *entity.Book
 
 	err := l.transactor.WithTx(ctx, func(ctx context.Context) error {
-		l.logger.Info("Transaction started for AddBook")
+		l.logger.Info("transaction started to add book",
+			zap.String("layer", "transaction"),
+			zap.String("trace_id", span.SpanContext().TraceID().String()))
 
 		var txErr error
 		book, txErr = l.booksRepository.AddBook(ctx, &entity.Book{
@@ -26,14 +38,13 @@ func (l *libraryImpl) AddBook(
 			AuthorIDs: authorIDs,
 		})
 		if txErr != nil {
-			l.logger.Error("Error adding book to repository:",
-				zap.Error(txErr))
+			span.RecordError(fmt.Errorf("error adding book to repository: %w", txErr))
 			return txErr
 		}
 
 		serialized, txErr := json.Marshal(book)
 		if txErr != nil {
-			l.logger.Error("Error serializing book data")
+			span.RecordError(fmt.Errorf("error serializing book: %w", txErr))
 			return txErr
 		}
 
@@ -41,18 +52,28 @@ func (l *libraryImpl) AddBook(
 		txErr = l.outboxRepository.SendMessage(
 			ctx, idempotencyKey, repository.OutboxKindBook, serialized)
 		if txErr != nil {
-			l.logger.Error("Error sending message to outbox",
-				zap.Error(txErr))
+			span.RecordError(fmt.Errorf("error sending message to outbox: %w", txErr))
 			return txErr
 		}
+
+		l.logger.Info("transaction finish to add book",
+			zap.String("layer", "transaction"),
+			zap.String("trace_id", span.SpanContext().TraceID().String()))
 
 		return nil
 	})
 
 	if err != nil {
-		l.logger.Error("Failed to add book", zap.Error(err))
+		span.RecordError(fmt.Errorf("error adding book to repository: %w", err))
 		return nil, err
 	}
+
+	span.SetAttributes(attribute.String("book.id", book.ID))
+	l.logger.Info("book registered",
+		zap.String("layer", "use_case_library"),
+		zap.String("trace_id", span.SpanContext().TraceID().String()),
+		zap.String("book_id", book.ID),
+	)
 
 	return book, nil
 }

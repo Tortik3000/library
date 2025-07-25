@@ -13,6 +13,7 @@ type (
 		GRPC
 		PG
 		Outbox
+		Observability
 	}
 
 	GRPC struct {
@@ -39,13 +40,24 @@ type (
 		AuthorSendURL   string        `env:"OUTBOX_AUTHOR_SEND_URL"`
 		BookSendURL     string        `env:"OUTBOX_BOOK_SEND_URL"`
 	}
+
+	Observability struct {
+		MetricsPort  string `env:"METRICS_PORT"`
+		JaegerURL    string `env:"JAEGER_URL"`
+		PyroscopeUrl string `env:"PYROSCOPE_URL"`
+	}
 )
 
 func New() (*Config, error) {
 	cfg := &Config{}
 
+	cfg.Observability.MetricsPort = os.Getenv("METRICS_PORT")
+	cfg.Observability.JaegerURL = os.Getenv("JAEGER_URL")
+	cfg.Observability.PyroscopeUrl = os.Getenv("PYROSCOPE_URL")
+
 	cfg.GRPC.Port = os.Getenv("GRPC_PORT")
 	cfg.GRPC.GatewayPort = os.Getenv("GRPC_GATEWAY_PORT")
+
 	cfg.PG.Host = os.Getenv("POSTGRES_HOST")
 	cfg.PG.Port = os.Getenv("POSTGRES_PORT")
 	cfg.PG.DB = os.Getenv("POSTGRES_DB")
@@ -91,6 +103,12 @@ func New() (*Config, error) {
 
 		cfg.Outbox.BookSendURL = os.Getenv("OUTBOX_BOOK_SEND_URL")
 		cfg.Outbox.AuthorSendURL = os.Getenv("OUTBOX_AUTHOR_SEND_URL")
+		cfg.Outbox.AuthorSendURL = "http://httpbin.org/post"
+
+		if cfg.Outbox.BookSendURL == "" || cfg.Outbox.AuthorSendURL == "" {
+			return nil, fmt.Errorf("Outbox URLs must be configured: BookSendURL='%s', AuthorSendURL='%s'",
+				cfg.Outbox.BookSendURL, cfg.Outbox.AuthorSendURL)
+		}
 	}
 
 	return cfg, nil

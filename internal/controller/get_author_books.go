@@ -2,6 +2,10 @@ package controller
 
 import (
 	"context"
+	"github.com/prometheus/client_golang/prometheus"
+	codes2 "go.opentelemetry.io/otel/codes"
+	"go.opentelemetry.io/otel/trace"
+	"time"
 
 	"go.uber.org/zap"
 	"google.golang.org/grpc/codes"
@@ -11,22 +15,55 @@ import (
 	"github.com/project/library/generated/api/library"
 )
 
+var (
+	GerAuthorBooksDuration = prometheus.NewHistogram(prometheus.HistogramOpts{
+		Name:    "library_get_author_books_duration_ms",
+		Help:    "Duration of GetAuthorBooks in ms",
+		Buckets: prometheus.DefBuckets,
+	})
+
+	GerAuthorBooksRequests = prometheus.NewCounter(prometheus.CounterOpts{
+		Name: "library_get_author_books_requests_total",
+		Help: "Total number of GetAuthorBooks requests",
+	})
+)
+
+func init() {
+	prometheus.MustRegister(GerAuthorBooksRequests)
+	prometheus.MustRegister(GerAuthorBooksDuration)
+}
+
 func (i *impl) GetAuthorBooks(
 	req *library.GetAuthorBooksRequest,
 	server library.Library_GetAuthorBooksServer,
 ) error {
-	i.logger.Info("Received GetAuthorBooks request",
-		zap.String("author Id", req.GetAuthorId()))
+	GerAuthorBooksRequests.Inc()
+	start := time.Now()
+
+	defer func() {
+		GerAuthorBooksDuration.Observe(float64(time.Since(start).Milliseconds()))
+	}()
+
+	span := trace.SpanFromContext(server.Context())
+	defer span.End()
+
+	i.logger.Info("start to get author's books",
+		zap.String("layer", "controller"),
+		zap.String("author_id", req.GetAuthorId()),
+		zap.String("trace_id", span.SpanContext().TraceID().String()),
+	)
 
 	if err := req.ValidateAll(); err != nil {
-		i.logger.Error("Invalid GetAuthorBooks request", zap.Error(err))
+		span.RecordError(err)
+		span.SetStatus(codes2.Code(codes.InvalidArgument),
+			"invalid get author's books request")
 		return status.Error(codes.InvalidArgument, err.Error())
 	}
 
 	books, err := i.authorUseCase.GetAuthorBooks(
 		context.Background(), req.GetAuthorId())
 	if err != nil {
-		i.logger.Error("Failed to get author books", zap.Error(err))
+		span.RecordError(err)
 		return i.ConvertErr(err)
 	}
 
@@ -42,6 +79,11 @@ func (i *impl) GetAuthorBooks(
 			return err
 		}
 	}
+
+	i.logger.Info("finish to get author's books",
+		zap.String("layer", "controller"),
+		zap.String("trace_id", span.SpanContext().TraceID().String()),
+	)
 
 	return nil
 }

@@ -4,6 +4,9 @@ import (
 	"context"
 	"database/sql"
 	"errors"
+	"github.com/prometheus/client_golang/prometheus"
+	"go.opentelemetry.io/otel/trace"
+	"time"
 
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
@@ -17,6 +20,26 @@ var _ AuthorRepository = (*postgresRepository)(nil)
 var _ BooksRepository = (*postgresRepository)(nil)
 
 var ErrForeignKeyViolation = &pgconn.PgError{Code: "23503"}
+
+var dbQueryLatency = prometheus.NewHistogramVec(
+	prometheus.HistogramOpts{
+		Name:    "db_query_latency_seconds",
+		Help:    "Latency of DB queries by operation",
+		Buckets: prometheus.DefBuckets,
+	},
+	[]string{"operation"},
+)
+
+func init() {
+	prometheus.MustRegister(dbQueryLatency)
+}
+
+func measureQueryLatency(operation string, queryFunc func() error) error {
+	start := time.Now()
+	err := queryFunc()
+	dbQueryLatency.WithLabelValues(operation).Observe(time.Since(start).Seconds())
+	return err
+}
 
 type postgresRepository struct {
 	db     PgxIface
@@ -37,8 +60,16 @@ func (p *postgresRepository) AddBook(
 	ctx context.Context,
 	book *entity.Book,
 ) (respBook *entity.Book, txErr error) {
+	span := trace.SpanFromContext(ctx)
+	p.logger.Info("start to add book",
+		zap.String("layer", "postgres"),
+		zap.String("book_id", book.ID),
+		zap.String("trace_id", span.SpanContext().TraceID().String()),
+	)
+
 	tx, rollback, err := p.beginTx(ctx)
 	if err != nil {
+		span.RecordError(err)
 		return nil, err
 	}
 	defer rollback(txErr)
@@ -50,17 +81,27 @@ RETURNING id, created_at, updated_at;
 `
 
 	id := uuid.UUID{}
-	err = tx.QueryRow(ctx, insertBook, book.Name).Scan(
-		&id, &book.CreatedAt, &book.UpdatedAt)
+	err = measureQueryLatency("insert_book", func() error {
+		return tx.QueryRow(ctx, insertBook, book.Name).Scan(
+			&id, &book.CreatedAt, &book.UpdatedAt)
+	})
+
 	if err != nil {
+		span.RecordError(err)
 		return nil, err
 	}
 	book.ID = id.String()
 
 	err = bulkInsertInAuthorBook(ctx, book.AuthorIDs, book.ID, tx)
 	if err != nil {
+		span.RecordError(err)
 		return nil, mapPostgresError(err, entity.ErrAuthorNotFound)
 	}
+
+	p.logger.Info("finish to add book",
+		zap.String("layer", "postgres"),
+		zap.String("trace_id", span.SpanContext().TraceID().String()),
+	)
 
 	return book, nil
 }
@@ -88,8 +129,10 @@ GROUP BY
 	var book entity.Book
 	var authorIDs []uuid.UUID
 
-	err := p.db.QueryRow(ctx, GetBook, bookID).Scan(&book.ID,
-		&book.Name, &book.CreatedAt, &book.UpdatedAt, &authorIDs)
+	err := measureQueryLatency("get_book", func() error {
+		return p.db.QueryRow(ctx, GetBook, bookID).Scan(&book.ID,
+			&book.Name, &book.CreatedAt, &book.UpdatedAt, &authorIDs)
+	})
 
 	if err != nil {
 		return nil, mapPostgresError(err, entity.ErrBookNotFound)
@@ -115,7 +158,11 @@ func (p *postgresRepository) UpdateBook(
 UPDATE book SET name = $1 WHERE id = $2;
 `
 
-	_, err = tx.Exec(ctx, UpdateBook, newBookName, bookID)
+	err = measureQueryLatency("update_book", func() error {
+		_, err := tx.Exec(ctx, UpdateBook, newBookName, bookID)
+		return err
+	})
+
 	if err != nil {
 		return err
 	}
@@ -143,8 +190,17 @@ func (p *postgresRepository) RegisterAuthor(
 	ctx context.Context,
 	author *entity.Author,
 ) (respAuthor *entity.Author, txErr error) {
+	span := trace.SpanFromContext(ctx)
+
+	p.logger.Info("start to register author",
+		zap.String("layer", "postgres"),
+		zap.String("author_id", author.ID),
+		zap.String("trace_id", span.SpanContext().TraceID().String()),
+	)
+
 	tx, rollback, err := p.beginTx(ctx)
 	if err != nil {
+		span.RecordError(err)
 		return nil, err
 	}
 	defer rollback(txErr)
@@ -155,11 +211,20 @@ VALUES ($1)
 RETURNING id;
 `
 	id := uuid.UUID{}
-	err = tx.QueryRow(ctx, InsertAuthor, author.Name).Scan(&id)
+	err = measureQueryLatency("insert_author", func() error {
+		return tx.QueryRow(ctx, InsertAuthor, author.Name).Scan(&id)
+	})
+
 	if err != nil {
+		span.RecordError(err)
 		return nil, err
 	}
 	author.ID = id.String()
+
+	p.logger.Info("finish to register author",
+		zap.String("layer", "postgres"),
+		zap.String("trace_id", span.SpanContext().TraceID().String()),
+	)
 
 	return author, nil
 }
@@ -175,8 +240,12 @@ WHERE id = $1;
 `
 
 	var author entity.Author
-	err := p.db.QueryRow(ctx, GetQueryAuthor, authorID).
-		Scan(&author.ID, &author.Name)
+
+	err := measureQueryLatency("get_author_info", func() error {
+		return p.db.QueryRow(ctx, GetQueryAuthor, authorID).
+			Scan(&author.ID, &author.Name)
+	})
+
 	if err != nil {
 		return nil, mapPostgresError(err, entity.ErrAuthorNotFound)
 	}
@@ -198,8 +267,11 @@ func (p *postgresRepository) ChangeAuthor(
 	const UpdateAuthor = `
 UPDATE author SET name = $1 WHERE id = $2;
 `
+	err = measureQueryLatency("update_author", func() error {
+		_, err := tx.Exec(ctx, UpdateAuthor, newAuthorName, authorID)
+		return err
+	})
 
-	_, err = tx.Exec(ctx, UpdateAuthor, newAuthorName, authorID)
 	if err != nil {
 		return err
 	}
