@@ -42,8 +42,6 @@
     docker-compose up -d
 ```
 
-## Run
-
 To run, you need to set env parameters
 
 .env:
