@@ -102,7 +102,7 @@ func Test_AddBook(t *testing.T) {
 			authorUseCase := mocks.NewMockAuthorUseCase(ctrl)
 			bookUseCase := mocks.NewMockBooksUseCase(ctrl)
 			service := controller.New(logger, bookUseCase, authorUseCase)
-			
+
 			if tt.mocksUsed {
 				bookUseCase.EXPECT().AddBook(ctx, tt.args.req.GetName(),
 					tt.args.req.GetAuthorId()).

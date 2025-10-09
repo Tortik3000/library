@@ -12,7 +12,7 @@ UNAME_P := $(shell uname -p)
 ARCH :=
 
 ifeq ($(UNAME_S),Linux)
-    INSTALL_CMD = apt update && apt install -y protobuf-compiler
+    INSTALL_CMD = sudo -s apt update && sudo -s apt install -y protobuf-compiler
     ARCH = linux-x86_64
 endif
 
