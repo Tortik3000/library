@@ -5,21 +5,6 @@ The Library Management System is a Go-based application designed to manage
 authors and books. It provides functionalities to register authors,
 add books, and retrieve information about authors and books.
 
-## Install
-
-```shell
-    git clone git@github.com:itmo-org/ctgo-library-service-Tortik3000.git
-    cd ctgo-library-service-Tortik3000
-    git checkout hw
-    make all
-```
-
-## Docker-compose for db
-
-```shell
-    docker-compose up -d
-```
-
 ## Run
 
 To run, you need to set env parameters
@@ -44,7 +29,14 @@ To run, you need to set env parameters
     OUTBOX_BOOK_SEND_URL=http://author-service/send;
 ```
 
+### Docker-compose for db
+
 ```shell
+    docker-compose up -d
+```
+
+```shell
+    make all
     env $(cat .env | xargs) bin/library
 ```
 

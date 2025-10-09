@@ -26,7 +26,7 @@ ifeq ($(UNAME_S),Darwin)
     endif
 endif
 
-all: generate lint test
+all: generate lint test build
 
 .PHONY: lint
 lint:
