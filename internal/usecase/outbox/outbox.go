@@ -2,11 +2,9 @@ package outbox
 
 import (
 	"context"
-	"sync"
 	"time"
 
 	"github.com/prometheus/client_golang/prometheus"
-
 	"go.uber.org/zap"
 
 	"github.com/project/library/config"
@@ -77,23 +75,18 @@ func (o *outboxImpl) Start(
 	waitTime time.Duration,
 	inProgressTTL time.Duration,
 ) {
-	wg := new(sync.WaitGroup)
 
 	for workerID := 1; workerID <= workers; workerID++ {
-		wg.Add(1)
-		go o.worker(ctx, wg, batchSize, waitTime, inProgressTTL)
+		go o.worker(ctx, batchSize, waitTime, inProgressTTL)
 	}
 }
 
 func (o *outboxImpl) worker(
 	ctx context.Context,
-	wg *sync.WaitGroup,
 	batchSize int,
 	waitTIme time.Duration,
 	inProgressTTL time.Duration,
 ) {
-	defer wg.Done()
-
 	for {
 		time.Sleep(waitTIme)
 
