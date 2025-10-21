@@ -26,6 +26,7 @@ scrape_configs:
             author_id: author_id
             layer: layer
             table: table
+            span_id: span_id
 
       - labels:
           level:
@@ -34,3 +35,4 @@ scrape_configs:
           author_id:
           layer:
           table:
+          span_id:

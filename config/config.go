@@ -103,7 +103,6 @@ func New() (*Config, error) {
 
 		cfg.Outbox.BookSendURL = os.Getenv("OUTBOX_BOOK_SEND_URL")
 		cfg.Outbox.AuthorSendURL = os.Getenv("OUTBOX_AUTHOR_SEND_URL")
-		cfg.Outbox.AuthorSendURL = "http://httpbin.org/post"
 
 		if cfg.Outbox.BookSendURL == "" || cfg.Outbox.AuthorSendURL == "" {
 			return nil, fmt.Errorf("Outbox URLs must be configured: BookSendURL='%s', AuthorSendURL='%s'",

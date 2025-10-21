@@ -4,39 +4,20 @@ import (
 	"context"
 	"time"
 
-	"github.com/prometheus/client_golang/prometheus"
+	"github.com/project/library/metrics"
+	"go.opentelemetry.io/otel"
+	"go.opentelemetry.io/otel/attribute"
+	"go.opentelemetry.io/otel/trace"
 	"go.uber.org/zap"
 
 	"github.com/project/library/config"
 	"github.com/project/library/internal/usecase/repository"
 )
 
-var (
-	outboxTasksFailedTotal = prometheus.NewCounterVec(
-		prometheus.CounterOpts{
-			Name: "outbox_tasks_failed_total",
-			Help: "Total number of failed outbox message processing attempts",
-		},
-		[]string{"kind"},
-	)
-
-	outboxTasksDurationTotal = prometheus.NewHistogramVec(
-		prometheus.HistogramOpts{
-			Name:    "outbox_tasks_duration_ms",
-			Help:    "Duration of process outbox tasks in ms",
-			Buckets: prometheus.DefBuckets,
-		},
-		[]string{"kind"},
-	)
-)
-
-func init() {
-	prometheus.MustRegister(outboxTasksDurationTotal)
-	prometheus.MustRegister(outboxTasksFailedTotal)
-}
-
 type GlobalHandler = func(kind repository.OutboxKind) (KindHandler, error)
 type KindHandler = func(ctx context.Context, data []byte) error
+
+var tracer = otel.Tracer("library-service")
 
 type Outbox interface {
 	Start(ctx context.Context, workers int, batchSize int,
@@ -75,7 +56,6 @@ func (o *outboxImpl) Start(
 	waitTime time.Duration,
 	inProgressTTL time.Duration,
 ) {
-
 	for workerID := 1; workerID <= workers; workerID++ {
 		go o.worker(ctx, batchSize, waitTime, inProgressTTL)
 	}
@@ -87,6 +67,8 @@ func (o *outboxImpl) worker(
 	waitTIme time.Duration,
 	inProgressTTL time.Duration,
 ) {
+	log := o.logger.With(
+		zap.String("layer", "outbox"))
 	for {
 		time.Sleep(waitTIme)
 
@@ -99,55 +81,95 @@ func (o *outboxImpl) worker(
 				ctx, batchSize, inProgressTTL)
 
 			if err != nil {
-				o.logger.Error("can not fetch messages from outbox",
+				log.Error("can not fetch messages from outbox",
 					zap.Error(err))
 				return err
 			}
 
 			successKeys := make([]string, 0, len(messages))
 
-			for i := 0; i < len(messages); i++ {
+			for _, message := range messages {
 				start := time.Now()
-				message := messages[i]
 				key := message.IdempotencyKey
+				kind := message.Kind.String()
+
+				traceID, parseErr := trace.TraceIDFromHex(message.TraceID)
+				if parseErr != nil {
+					log.Warn("invalid trace_id",
+						zap.String("trace_id", message.TraceID),
+						zap.Error(parseErr))
+				}
+
+				var eventCtx context.Context
+				if parseErr == nil {
+					parentSC := trace.NewSpanContext(trace.SpanContextConfig{
+						TraceID:    traceID,
+						SpanID:     trace.SpanID{},
+						TraceFlags: trace.FlagsSampled,
+						Remote:     true,
+					})
+					eventCtx = trace.ContextWithRemoteSpanContext(context.Background(), parentSC)
+				} else {
+					eventCtx = context.Background()
+				}
+
+				eventCtx, span := tracer.Start(eventCtx, "ProcessOutboxEvent")
+				span.SetAttributes(
+					attribute.String("outbox.id", message.IdempotencyKey),
+					attribute.String("outbox.kind", message.Kind.String()),
+				)
 
 				var kindHandler KindHandler
 				kindHandler, err = o.globalHandler(message.Kind)
 
 				if err != nil {
-					outboxTasksFailedTotal.WithLabelValues(message.Kind.String()).Inc()
-					o.logger.Error("unexpected kind", zap.Error(err))
+					log.Error("unexpected kind",
+						zap.String("trace_id", traceID.String()),
+						zap.String("span_id", span.SpanContext().SpanID().String()),
+						zap.Error(err))
+					metrics.OutboxTasksFailed.WithLabelValues(kind).Inc()
+					span.End()
 					continue
 				}
 
 				err = kindHandler(ctx, message.RawData)
 
+				duration := time.Since(start).Seconds()
+				metrics.OutboxTaskProcessingDuration.WithLabelValues(kind).Observe(duration)
+
 				if err != nil {
-					outboxTasksFailedTotal.WithLabelValues(message.Kind.String()).Inc()
-					o.logger.Error("kind error", zap.Error(err))
+					log.Error("kind error",
+						zap.String("trace_id", traceID.String()),
+						zap.String("span_id", span.SpanContext().SpanID().String()),
+						zap.Error(err))
+					metrics.OutboxTasksFailed.WithLabelValues(kind).Inc()
+					span.End()
 					continue
 				}
 
+				o.logger.Info("outbox worker executing",
+					zap.String("trace_id", traceID.String()),
+					zap.String("span_id", span.SpanContext().SpanID().String()),
+					zap.String("kind", message.Kind.String()),
+					zap.String("idempotency_key", message.IdempotencyKey))
+
 				successKeys = append(successKeys, key)
-				outboxTasksDurationTotal.WithLabelValues(message.Kind.String()).
-					Observe(float64(time.Since(start).Milliseconds()))
+				metrics.OutboxTasksProcessed.WithLabelValues(kind).Inc()
+				span.End()
 			}
 
 			err = o.outboxRepository.MarkAsProcessed(ctx, successKeys)
 			if err != nil {
-				o.logger.Error("mark as processed outbox error",
-					zap.Error(err))
+				o.logger.Error("mark as processed outbox error", zap.Error(err))
 				return err
 			}
-
-			o.logger.Info("mark as processed", zap.Int("entities", len(successKeys)))
 
 			return nil
 		})
 
 		if err != nil {
-			o.logger.Error("worker stage error",
-				zap.Error(err))
+			o.logger.Error("worker transaction error", zap.Error(err))
+			return
 		}
 	}
 }

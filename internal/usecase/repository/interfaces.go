@@ -38,7 +38,7 @@ type (
 	}
 
 	OutboxRepository interface {
-		SendMessage(ctx context.Context, idempotencyKey string, kind OutboxKind, message []byte) error
+		SendMessage(ctx context.Context, idempotencyKey string, kind OutboxKind, message []byte, traceID string) error
 		GetMessages(ctx context.Context, batchSize int, inProgressTTL time.Duration) ([]OutboxData, error)
 		MarkAsProcessed(ctx context.Context, idempotencyKeys []string) error
 	}
@@ -47,6 +47,7 @@ type (
 		IdempotencyKey string
 		Kind           OutboxKind
 		RawData        []byte
+		TraceID        string
 	}
 )
 

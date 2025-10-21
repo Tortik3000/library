@@ -8,8 +8,6 @@ import (
 	"go.opentelemetry.io/otel/attribute"
 	"go.opentelemetry.io/otel/trace"
 
-	"go.uber.org/zap"
-
 	"github.com/project/library/internal/entity"
 	"github.com/project/library/internal/usecase/repository"
 )
@@ -20,18 +18,11 @@ func (l *libraryImpl) AddBook(
 	authorIDs []string,
 ) (*entity.Book, error) {
 	span := trace.SpanFromContext(ctx)
-	l.logger.Info("start to add book",
-		zap.String("layer", "use_case_library"),
-		zap.String("trace_id", span.SpanContext().TraceID().String()),
-	)
+	traceID := span.SpanContext().TraceID().String()
 
 	var book *entity.Book
 
 	err := l.transactor.WithTx(ctx, func(ctx context.Context) error {
-		l.logger.Info("transaction started to add book",
-			zap.String("layer", "transaction"),
-			zap.String("trace_id", span.SpanContext().TraceID().String()))
-
 		var txErr error
 		book, txErr = l.booksRepository.AddBook(ctx, &entity.Book{
 			Name:      name,
@@ -50,15 +41,11 @@ func (l *libraryImpl) AddBook(
 
 		idempotencyKey := repository.OutboxKindBook.String() + "_" + book.ID
 		txErr = l.outboxRepository.SendMessage(
-			ctx, idempotencyKey, repository.OutboxKindBook, serialized)
+			ctx, idempotencyKey, repository.OutboxKindBook, serialized, traceID)
 		if txErr != nil {
 			span.RecordError(fmt.Errorf("error sending message to outbox: %w", txErr))
 			return txErr
 		}
-
-		l.logger.Info("transaction finish to add book",
-			zap.String("layer", "transaction"),
-			zap.String("trace_id", span.SpanContext().TraceID().String()))
 
 		return nil
 	})
@@ -69,11 +56,6 @@ func (l *libraryImpl) AddBook(
 	}
 
 	span.SetAttributes(attribute.String("book.id", book.ID))
-	l.logger.Info("book registered",
-		zap.String("layer", "use_case_library"),
-		zap.String("trace_id", span.SpanContext().TraceID().String()),
-		zap.String("book_id", book.ID),
-	)
 
 	return book, nil
 }

@@ -2,11 +2,9 @@ package controller
 
 import (
 	"context"
-	"github.com/prometheus/client_golang/prometheus"
-	codes2 "go.opentelemetry.io/otel/codes"
-	"go.opentelemetry.io/otel/trace"
-	"time"
 
+	"go.opentelemetry.io/otel/attribute"
+	"go.opentelemetry.io/otel/trace"
 	"go.uber.org/zap"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
@@ -14,55 +12,36 @@ import (
 	"github.com/project/library/generated/api/library"
 )
 
-var (
-	RegisterAuthorDuration = prometheus.NewHistogram(prometheus.HistogramOpts{
-		Name:    "library_register_author_duration_ms",
-		Help:    "Duration of RegisterAuthor in ms",
-		Buckets: prometheus.DefBuckets,
-	})
-
-	RegisterAuthorRequests = prometheus.NewCounter(prometheus.CounterOpts{
-		Name: "library_register_author_requests_total",
-		Help: "Total number of RegisterAuthor requests",
-	})
-)
-
-func init() {
-	prometheus.MustRegister(RegisterAuthorDuration)
-	prometheus.MustRegister(RegisterAuthorRequests)
-}
-
 func (i *impl) RegisterAuthor(
 	ctx context.Context,
 	req *library.RegisterAuthorRequest,
 ) (*library.RegisterAuthorResponse, error) {
-	RegisterAuthorRequests.Inc()
-	start := time.Now()
-
-	defer func() {
-		AddBookDuration.Observe(float64(time.Since(start).Milliseconds()))
-	}()
-
 	span := trace.SpanFromContext(ctx)
+	spanCtx := span.SpanContext()
 	defer span.End()
 
-	i.logger.Info("start to register author",
+	log := i.logger.With(
+		zap.String("trace_id", spanCtx.TraceID().String()),
+		zap.String("span_id", spanCtx.SpanID().String()),
 		zap.String("layer", "controller"),
-		zap.String("author_name", req.GetName()),
-		zap.String("trace_id", span.SpanContext().TraceID().String()))
+	)
+	log.Info("start RegisterAuthor")
 
 	if err := req.ValidateAll(); err != nil {
+		log.Warn("invalid data", zap.Error(err))
 		span.RecordError(err)
-		span.SetStatus(codes2.Code(codes.InvalidArgument), "invalid register author request")
-
 		return nil, status.Error(codes.InvalidArgument, err.Error())
 	}
 
 	author, err := i.authorUseCase.RegisterAuthor(ctx, req.GetName())
 	if err != nil {
+		log.Warn("failed RegisterAuthor", zap.Error(err))
 		span.RecordError(err)
 		return nil, i.ConvertErr(err)
 	}
+
+	log.Info("successfully finished RegisterAuthor", zap.String("author_id", author.ID))
+	span.SetAttributes(attribute.String("author_id", author.ID))
 
 	return &library.RegisterAuthorResponse{
 		Id: author.ID,

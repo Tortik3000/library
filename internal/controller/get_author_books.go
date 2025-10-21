@@ -2,11 +2,9 @@ package controller
 
 import (
 	"context"
-	"github.com/prometheus/client_golang/prometheus"
-	codes2 "go.opentelemetry.io/otel/codes"
-	"go.opentelemetry.io/otel/trace"
-	"time"
 
+	"go.opentelemetry.io/otel/attribute"
+	"go.opentelemetry.io/otel/trace"
 	"go.uber.org/zap"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
@@ -15,60 +13,41 @@ import (
 	"github.com/project/library/generated/api/library"
 )
 
-var (
-	GerAuthorBooksDuration = prometheus.NewHistogram(prometheus.HistogramOpts{
-		Name:    "library_get_author_books_duration_ms",
-		Help:    "Duration of GetAuthorBooks in ms",
-		Buckets: prometheus.DefBuckets,
-	})
-
-	GerAuthorBooksRequests = prometheus.NewCounter(prometheus.CounterOpts{
-		Name: "library_get_author_books_requests_total",
-		Help: "Total number of GetAuthorBooks requests",
-	})
-)
-
-func init() {
-	prometheus.MustRegister(GerAuthorBooksRequests)
-	prometheus.MustRegister(GerAuthorBooksDuration)
-}
-
 func (i *impl) GetAuthorBooks(
 	req *library.GetAuthorBooksRequest,
 	server library.Library_GetAuthorBooksServer,
 ) error {
-	GerAuthorBooksRequests.Inc()
-	start := time.Now()
-
-	defer func() {
-		GerAuthorBooksDuration.Observe(float64(time.Since(start).Milliseconds()))
-	}()
-
 	span := trace.SpanFromContext(server.Context())
+	spanCtx := span.SpanContext()
+	span.SetAttributes(attribute.String("author_id", req.GetAuthorId()))
+
 	defer span.End()
 
-	i.logger.Info("start to get author's books",
+	log := i.logger.With(
+		zap.String("trace_id", spanCtx.TraceID().String()),
+		zap.String("span_id", spanCtx.SpanID().String()),
 		zap.String("layer", "controller"),
 		zap.String("author_id", req.GetAuthorId()),
-		zap.String("trace_id", span.SpanContext().TraceID().String()),
 	)
 
+	log.Info("start GetAuthorBooks")
+
 	if err := req.ValidateAll(); err != nil {
+		log.Warn("invalid data", zap.Error(err))
 		span.RecordError(err)
-		span.SetStatus(codes2.Code(codes.InvalidArgument),
-			"invalid get author's books request")
 		return status.Error(codes.InvalidArgument, err.Error())
 	}
 
 	books, err := i.authorUseCase.GetAuthorBooks(
 		context.Background(), req.GetAuthorId())
 	if err != nil {
+		log.Warn("failed GetAuthorBooks", zap.Error(err))
 		span.RecordError(err)
 		return i.ConvertErr(err)
 	}
 
 	for _, book := range books {
-		err := server.Send(&library.Book{
+		err = server.Send(&library.Book{
 			Id:        book.ID,
 			Name:      book.Name,
 			AuthorId:  book.AuthorIDs,
@@ -76,14 +55,13 @@ func (i *impl) GetAuthorBooks(
 			UpdatedAt: timestamppb.New(book.UpdatedAt),
 		})
 		if err != nil {
+			log.Warn("failed to insert record in stream", zap.Error(err))
+			span.RecordError(err)
 			return err
 		}
 	}
 
-	i.logger.Info("finish to get author's books",
-		zap.String("layer", "controller"),
-		zap.String("trace_id", span.SpanContext().TraceID().String()),
-	)
+	log.Info("successfully finished GetAuthorBooks")
 
 	return nil
 }

@@ -2,12 +2,9 @@ package controller
 
 import (
 	"context"
-	codes2 "go.opentelemetry.io/otel/codes"
-	"time"
 
-	"github.com/prometheus/client_golang/prometheus"
+	"go.opentelemetry.io/otel/attribute"
 	"go.opentelemetry.io/otel/trace"
-
 	"go.uber.org/zap"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
@@ -16,61 +13,39 @@ import (
 	"github.com/project/library/generated/api/library"
 )
 
-var (
-	AddBookDuration = prometheus.NewHistogram(prometheus.HistogramOpts{
-		Name:    "library_add_book_duration_ms",
-		Help:    "Duration of AddBook in ms",
-		Buckets: prometheus.DefBuckets,
-	})
-
-	AddBookRequests = prometheus.NewCounter(prometheus.CounterOpts{
-		Name: "library_add_book_requests_total",
-		Help: "Total number of AddBook requests",
-	})
-)
-
-func init() {
-	prometheus.MustRegister(AddBookRequests)
-	prometheus.MustRegister(AddBookDuration)
-}
-
 func (i *impl) AddBook(
 	ctx context.Context,
 	req *library.AddBookRequest,
 ) (*library.AddBookResponse, error) {
-	AddBookRequests.Inc()
-	start := time.Now()
-
-	defer func() {
-		AddBookDuration.Observe(float64(time.Since(start).Milliseconds()))
-	}()
-
 	span := trace.SpanFromContext(ctx)
+	spanCtx := span.SpanContext()
 	defer span.End()
 
-	i.logger.Info("start to add book",
+	log := i.logger.With(
 		zap.String("layer", "controller"),
+		zap.String("span_id", spanCtx.SpanID().String()),
+		zap.String("trace_id", spanCtx.TraceID().String()),
+	)
+
+	log.Info("start addBook",
 		zap.String("book_name", req.GetName()),
-		zap.String("trace_id", span.SpanContext().TraceID().String()),
 	)
 
 	if err := req.ValidateAll(); err != nil {
+		log.Warn("invalid data", zap.Error(err))
 		span.RecordError(err)
-		span.SetStatus(codes2.Code(codes.InvalidArgument),
-			"invalid add book request")
 		return nil, status.Error(codes.InvalidArgument, err.Error())
 	}
 
 	book, err := i.booksUseCase.AddBook(ctx, req.GetName(), req.GetAuthorId())
 	if err != nil {
+		log.Warn("failed AddBook", zap.Error(err))
 		span.RecordError(err)
 		return nil, i.ConvertErr(err)
 	}
 
-	i.logger.Info("finish to add book",
-		zap.String("layer", "controller"),
-		zap.String("trace_id", span.SpanContext().TraceID().String()),
-	)
+	log.Info("successfully finished AddBook", zap.String("book_id", book.ID))
+	span.SetAttributes(attribute.String("book_id", book.ID))
 
 	return &library.AddBookResponse{
 		Book: &library.Book{

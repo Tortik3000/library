@@ -2,11 +2,9 @@ package controller
 
 import (
 	"context"
-	"github.com/prometheus/client_golang/prometheus"
-	codes2 "go.opentelemetry.io/otel/codes"
-	"go.opentelemetry.io/otel/trace"
-	"time"
 
+	"go.opentelemetry.io/otel/attribute"
+	"go.opentelemetry.io/otel/trace"
 	"go.uber.org/zap"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
@@ -14,61 +12,38 @@ import (
 	"github.com/project/library/generated/api/library"
 )
 
-var (
-	GetAuthorInfoDuration = prometheus.NewHistogram(prometheus.HistogramOpts{
-		Name:    "library_get_author_duration_ms",
-		Help:    "Duration of GetAuthorInfo in ms",
-		Buckets: prometheus.DefBuckets,
-	})
-
-	GetAuthorInfoRequests = prometheus.NewCounter(prometheus.CounterOpts{
-		Name: "library_get_author_requests_total",
-		Help: "Total number of GetAuthorInfo requests",
-	})
-)
-
-func init() {
-	prometheus.MustRegister(GetAuthorInfoDuration)
-	prometheus.MustRegister(GetAuthorInfoRequests)
-}
-
 func (i *impl) GetAuthorInfo(
 	ctx context.Context,
 	req *library.GetAuthorInfoRequest,
 ) (*library.GetAuthorInfoResponse, error) {
-	GetAuthorInfoRequests.Inc()
-	start := time.Now()
-
-	defer func() {
-		GetAuthorInfoDuration.Observe(float64(time.Since(start).Milliseconds()))
-	}()
-
 	span := trace.SpanFromContext(ctx)
+	spanCtx := span.SpanContext()
+	span.SetAttributes(attribute.String("author_id", req.GetId()))
 	defer span.End()
 
-	i.logger.Info("start to get author info",
+	log := i.logger.With(
+		zap.String("trace_id", spanCtx.TraceID().String()),
+		zap.String("span_id", spanCtx.SpanID().String()),
 		zap.String("layer", "controller"),
-		zap.String("author_id", req.Id),
-		zap.String("trace_id", span.SpanContext().TraceID().String()),
+		zap.String("author_id", req.GetId()),
 	)
 
+	log.Info("start GetAuthorInfo")
+
 	if err := req.ValidateAll(); err != nil {
+		log.Warn("invalid data", zap.Error(err))
 		span.RecordError(err)
-		span.SetStatus(codes2.Code(codes.InvalidArgument),
-			"invalid get author request")
 		return nil, status.Error(codes.InvalidArgument, err.Error())
 	}
 
 	author, err := i.authorUseCase.GetAuthorInfo(ctx, req.GetId())
 	if err != nil {
+		log.Warn("failed GetAuthorInfo", zap.Error(err))
 		span.RecordError(err)
 		return nil, i.ConvertErr(err)
 	}
 
-	i.logger.Info("finish to get author info",
-		zap.String("layer", "controller"),
-		zap.String("trace_id", span.SpanContext().TraceID().String()),
-	)
+	log.Info("successfully finished GetAuthorInfo")
 
 	return &library.GetAuthorInfoResponse{
 		Id:   author.ID,

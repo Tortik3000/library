@@ -13,3 +13,8 @@ datasources:
     url: http://loki:3100
     jsonData:
       maxLines: 1000
+
+  - name: Jaeger
+    type: jaeger
+    access: proxy
+    url: http://jaeger:16686

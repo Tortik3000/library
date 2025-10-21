@@ -5,6 +5,4 @@
 
 /cover.out
 /cover.out.tmp
-.env
 *_mock.go
-*.json

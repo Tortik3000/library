@@ -4,13 +4,13 @@ import (
 	"context"
 	"database/sql"
 	"errors"
-	"github.com/prometheus/client_golang/prometheus"
-	"go.opentelemetry.io/otel/trace"
 	"time"
 
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgconn"
+	"github.com/project/library/metrics"
+	"go.opentelemetry.io/otel/trace"
 	"go.uber.org/zap"
 
 	"github.com/project/library/internal/entity"
@@ -21,23 +21,10 @@ var _ BooksRepository = (*postgresRepository)(nil)
 
 var ErrForeignKeyViolation = &pgconn.PgError{Code: "23503"}
 
-var dbQueryLatency = prometheus.NewHistogramVec(
-	prometheus.HistogramOpts{
-		Name:    "db_query_latency_seconds",
-		Help:    "Latency of DB queries by operation",
-		Buckets: prometheus.DefBuckets,
-	},
-	[]string{"operation"},
-)
-
-func init() {
-	prometheus.MustRegister(dbQueryLatency)
-}
-
 func measureQueryLatency(operation string, queryFunc func() error) error {
 	start := time.Now()
 	err := queryFunc()
-	dbQueryLatency.WithLabelValues(operation).Observe(time.Since(start).Seconds())
+	metrics.DBQueryLatency.WithLabelValues(operation).Observe(time.Since(start).Seconds())
 	return err
 }
 
@@ -268,7 +255,7 @@ func (p *postgresRepository) ChangeAuthor(
 UPDATE author SET name = $1 WHERE id = $2;
 `
 	err = measureQueryLatency("update_author", func() error {
-		_, err := tx.Exec(ctx, UpdateAuthor, newAuthorName, authorID)
+		_, err = tx.Exec(ctx, UpdateAuthor, newAuthorName, authorID)
 		return err
 	})
 

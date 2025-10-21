@@ -2,11 +2,9 @@ package controller
 
 import (
 	"context"
-	"github.com/prometheus/client_golang/prometheus"
-	codes2 "go.opentelemetry.io/otel/codes"
-	"go.opentelemetry.io/otel/trace"
-	"time"
 
+	"go.opentelemetry.io/otel/attribute"
+	"go.opentelemetry.io/otel/trace"
 	"go.uber.org/zap"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
@@ -15,61 +13,39 @@ import (
 	"github.com/project/library/generated/api/library"
 )
 
-var (
-	GetBookInfoDuration = prometheus.NewHistogram(prometheus.HistogramOpts{
-		Name:    "library_get_book_duration_ms",
-		Help:    "Duration of GetBookInfo in ms",
-		Buckets: prometheus.DefBuckets,
-	})
-
-	GetBookInfoRequests = prometheus.NewCounter(prometheus.CounterOpts{
-		Name: "library_get_book_requests_total",
-		Help: "Total number of GetBookInfo requests",
-	})
-)
-
-func init() {
-	prometheus.MustRegister(GetBookInfoRequests)
-	prometheus.MustRegister(GetBookInfoDuration)
-}
-
 func (i *impl) GetBookInfo(
 	ctx context.Context,
 	req *library.GetBookInfoRequest,
 ) (*library.GetBookInfoResponse, error) {
-	GetBookInfoRequests.Inc()
-	start := time.Now()
-
-	defer func() {
-		GetBookInfoDuration.Observe(time.Since(start).Seconds())
-	}()
-
 	span := trace.SpanFromContext(ctx)
+	spanCtx := span.SpanContext()
+	span.SetAttributes(attribute.String("book_id", req.GetId()))
+
 	defer span.End()
 
-	i.logger.Info("start to get book info",
+	log := i.logger.With(
+		zap.String("trace_id", spanCtx.TraceID().String()),
+		zap.String("span_id", spanCtx.SpanID().String()),
 		zap.String("layer", "controller"),
-		zap.String("book_id", req.Id),
-		zap.String("trace_id", span.SpanContext().TraceID().String()),
+		zap.String("book_id", req.GetId()),
 	)
 
+	log.Info("start GetBookInfo")
+
 	if err := req.ValidateAll(); err != nil {
+		log.Warn("invalid data", zap.Error(err))
 		span.RecordError(err)
-		span.SetStatus(codes2.Code(codes.InvalidArgument),
-			"invalid get book request")
 		return nil, status.Error(codes.InvalidArgument, err.Error())
 	}
 
 	book, err := i.booksUseCase.GetBook(ctx, req.GetId())
 	if err != nil {
+		log.Warn("failed GetBookInfo", zap.Error(err))
 		span.RecordError(err)
 		return nil, i.ConvertErr(err)
 	}
 
-	i.logger.Info("finish to get book info",
-		zap.String("layer", "controller"),
-		zap.String("trace_id", span.SpanContext().TraceID().String()),
-	)
+	log.Info("successfully finished GetBookInfo")
 
 	return &library.GetBookInfoResponse{
 		Book: &library.Book{
