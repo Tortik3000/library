@@ -1,7 +1,6 @@
 package controller
 
 import (
-	"context"
 	"testing"
 
 	"github.com/google/uuid"
@@ -20,11 +19,8 @@ import (
 
 func Test_AddBook(t *testing.T) {
 	t.Parallel()
-	ctrl := gomock.NewController(t)
-	ctx := t.Context()
 
 	type args struct {
-		ctx context.Context
 		req *library.AddBookRequest
 	}
 
@@ -38,8 +34,8 @@ func Test_AddBook(t *testing.T) {
 	}{
 		{
 			name: "add book",
-			args: args{ctx,
-				&library.AddBookRequest{
+			args: args{
+				req: &library.AddBookRequest{
 					Name:     "book",
 					AuthorId: make([]string, 0),
 				},
@@ -52,11 +48,10 @@ func Test_AddBook(t *testing.T) {
 			wantErrCode: codes.OK,
 			mocksUsed:   true,
 		},
-
 		{
 			name: "add book | with err",
-			args: args{ctx,
-				&library.AddBookRequest{
+			args: args{
+				req: &library.AddBookRequest{
 					Name:     "book",
 					AuthorId: make([]string, 0),
 				},
@@ -65,32 +60,29 @@ func Test_AddBook(t *testing.T) {
 			wantErr:     entity.ErrAuthorNotFound,
 			mocksUsed:   true,
 		},
-
 		{
 			name: "add book | with invalid authors",
 			args: args{
-				ctx,
-				&library.AddBookRequest{
+				req: &library.AddBookRequest{
 					Name:     "book",
 					AuthorId: []string{"1"},
 				},
 			},
-
 			wantErrCode: codes.InvalidArgument,
 			wantErr:     status.Error(codes.InvalidArgument, "error"),
+			mocksUsed:   false,
 		},
-
 		{
 			name: "add book | with invalid name",
 			args: args{
-				ctx,
-				&library.AddBookRequest{
+				req: &library.AddBookRequest{
 					Name:     "",
 					AuthorId: make([]string, 0),
 				},
 			},
 			wantErrCode: codes.InvalidArgument,
 			wantErr:     status.Error(codes.InvalidArgument, "error"),
+			mocksUsed:   false,
 		},
 	}
 
@@ -98,10 +90,14 @@ func Test_AddBook(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			t.Parallel()
 
+			ctrl := gomock.NewController(t)
+			t.Cleanup(ctrl.Finish)
+
 			logger, _ := zap.NewProduction()
 			authorUseCase := mocks.NewMockAuthorUseCase(ctrl)
 			bookUseCase := mocks.NewMockBooksUseCase(ctrl)
 			service := controller.New(logger, bookUseCase, authorUseCase)
+			ctx := t.Context()
 
 			if tt.mocksUsed {
 				bookUseCase.EXPECT().AddBook(ctx, tt.args.req.GetName(),
@@ -109,7 +105,7 @@ func Test_AddBook(t *testing.T) {
 					Return(tt.want, tt.wantErr)
 			}
 
-			got, err := service.AddBook(tt.args.ctx, tt.args.req)
+			got, err := service.AddBook(ctx, tt.args.req)
 
 			testutils.CheckError(t, err, tt.wantErrCode)
 			if err == nil && tt.want != nil {

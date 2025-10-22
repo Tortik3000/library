@@ -3,6 +3,8 @@ package controller
 import (
 	"context"
 
+	"go.opentelemetry.io/otel/attribute"
+	"go.opentelemetry.io/otel/trace"
 	"go.uber.org/zap"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
@@ -14,19 +16,30 @@ func (i *impl) RegisterAuthor(
 	ctx context.Context,
 	req *library.RegisterAuthorRequest,
 ) (*library.RegisterAuthorResponse, error) {
-	i.logger.Info("Received RegisterAuthor request",
-		zap.String("author name", req.GetName()))
+	span := trace.SpanFromContext(ctx)
+	spanCtx := span.SpanContext()
+	defer span.End()
+
+	log := i.logger.With(
+		zap.String("trace_id", spanCtx.TraceID().String()),
+		zap.String("span_id", spanCtx.SpanID().String()),
+		zap.String("layer", "controller"),
+	)
+	log.Info("start RegisterAuthor")
 
 	if err := req.ValidateAll(); err != nil {
-		i.logger.Error("Invalid RegisterAuthor request", zap.Error(err))
+		log.Warn("invalid data", zap.Error(err))
+		span.RecordError(err)
 		return nil, status.Error(codes.InvalidArgument, err.Error())
 	}
 
 	author, err := i.authorUseCase.RegisterAuthor(ctx, req.GetName())
 	if err != nil {
-		i.logger.Error("Failed to register author", zap.Error(err))
-		return nil, i.ConvertErr(err)
+		return nil, i.handleError(span, err, "RegisterAuthor")
 	}
+
+	log.Info("successfully finished RegisterAuthor", zap.String("author_id", author.ID))
+	span.SetAttributes(attribute.String("author.id", author.ID))
 
 	return &library.RegisterAuthorResponse{
 		Id: author.ID,

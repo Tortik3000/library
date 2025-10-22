@@ -19,10 +19,7 @@ import (
 
 func Test_GetAuthorInfo(t *testing.T) {
 	t.Parallel()
-	ctrl := gomock.NewController(t)
-	ctx := t.Context()
 
-	authorID := uuid.NewString()
 	tests := []struct {
 		name        string
 		req         *library.GetAuthorInfoRequest
@@ -34,11 +31,11 @@ func Test_GetAuthorInfo(t *testing.T) {
 		{
 			name: "get author info",
 			req: &library.GetAuthorInfoRequest{
-				Id: authorID,
+				Id: uuid.NewString(),
 			},
 			want: &entity.Author{
 				Name: "name",
-				ID:   authorID,
+				ID:   uuid.NewString(),
 			},
 			wantErrCode: codes.OK,
 			mocksUsed:   true,
@@ -59,6 +56,7 @@ func Test_GetAuthorInfo(t *testing.T) {
 			},
 			wantErrCode: codes.InvalidArgument,
 			wantErr:     status.Error(codes.InvalidArgument, "err"),
+			mocksUsed:   false,
 		},
 	}
 
@@ -66,10 +64,14 @@ func Test_GetAuthorInfo(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			t.Parallel()
 
+			ctrl := gomock.NewController(t)
+			t.Cleanup(ctrl.Finish)
+
 			logger, _ := zap.NewProduction()
 			authorUseCase := mocks.NewMockAuthorUseCase(ctrl)
 			bookUseCase := mocks.NewMockBooksUseCase(ctrl)
 			service := controller.New(logger, bookUseCase, authorUseCase)
+			ctx := t.Context()
 
 			if tt.mocksUsed {
 				authorUseCase.EXPECT().GetAuthorInfo(ctx, tt.req.GetId()).Return(tt.want, tt.wantErr)

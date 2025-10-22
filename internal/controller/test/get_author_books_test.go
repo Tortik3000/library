@@ -1,6 +1,7 @@
 package controller
 
 import (
+	"context"
 	"testing"
 
 	"github.com/google/uuid"
@@ -20,6 +21,14 @@ import (
 type mockLibraryGetAuthorBooksServer struct {
 	grpc.ServerStream
 	books []*library.Book
+	ctx   context.Context
+}
+
+func (m *mockLibraryGetAuthorBooksServer) Context() context.Context {
+	if m.ctx == nil {
+		return context.Background()
+	}
+	return m.ctx
 }
 
 func (m *mockLibraryGetAuthorBooksServer) Send(book *library.Book) error {
@@ -29,6 +38,14 @@ func (m *mockLibraryGetAuthorBooksServer) Send(book *library.Book) error {
 
 type mockLibraryGetAuthorBooksServerErr struct {
 	grpc.ServerStream
+	ctx context.Context
+}
+
+func (m *mockLibraryGetAuthorBooksServerErr) Context() context.Context {
+	if m.ctx == nil {
+		return context.Background()
+	}
+	return m.ctx
 }
 
 func (m *mockLibraryGetAuthorBooksServerErr) Send(book *library.Book) error {
@@ -38,7 +55,6 @@ func (m *mockLibraryGetAuthorBooksServerErr) Send(book *library.Book) error {
 
 func Test_GetAuthorBooks(t *testing.T) {
 	t.Parallel()
-	ctrl := gomock.NewController(t)
 
 	tests := []struct {
 		name        string
@@ -56,7 +72,9 @@ func Test_GetAuthorBooks(t *testing.T) {
 			wantErrCode: codes.NotFound,
 			wantErr:     entity.ErrAuthorNotFound,
 			mocksUsed:   true,
-			server:      &mockLibraryGetAuthorBooksServer{},
+			server: &mockLibraryGetAuthorBooksServer{
+				ctx: context.Background(),
+			},
 		},
 		{
 			name: "get author books | with err invalid args",
@@ -65,23 +83,31 @@ func Test_GetAuthorBooks(t *testing.T) {
 			},
 			wantErrCode: codes.InvalidArgument,
 			wantErr:     status.Error(codes.InvalidArgument, "error"),
-			server:      &mockLibraryGetAuthorBooksServer{},
+			mocksUsed:   false,
+			server: &mockLibraryGetAuthorBooksServer{
+				ctx: context.Background(),
+			},
 		},
 		{
-			"get author books | with err internal",
-			&library.GetAuthorBooksRequest{
+			name: "get author books | with err internal",
+			req: &library.GetAuthorBooksRequest{
 				AuthorId: uuid.NewString(),
 			},
-			codes.Internal,
-			status.Error(codes.Internal, "error"),
-			true,
-			&mockLibraryGetAuthorBooksServerErr{},
+			wantErrCode: codes.Internal,
+			wantErr:     status.Error(codes.Internal, "error"),
+			mocksUsed:   true,
+			server: &mockLibraryGetAuthorBooksServerErr{
+				ctx: context.Background(),
+			},
 		},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			t.Parallel()
+
+			ctrl := gomock.NewController(t)
+			t.Cleanup(ctrl.Finish)
 
 			logger, _ := zap.NewProduction()
 			authorUseCase := mocks.NewMockAuthorUseCase(ctrl)

@@ -3,6 +3,8 @@ package controller
 import (
 	"context"
 
+	"go.opentelemetry.io/otel/attribute"
+	"go.opentelemetry.io/otel/trace"
 	"go.uber.org/zap"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
@@ -15,19 +17,33 @@ func (i *impl) GetBookInfo(
 	ctx context.Context,
 	req *library.GetBookInfoRequest,
 ) (*library.GetBookInfoResponse, error) {
-	i.logger.Info("Received GetBook request",
-		zap.String("book ID", req.GetId()))
+	span := trace.SpanFromContext(ctx)
+	spanCtx := span.SpanContext()
+	span.SetAttributes(attribute.String("book.id", req.GetId()))
+
+	defer span.End()
+
+	log := i.logger.With(
+		zap.String("trace_id", spanCtx.TraceID().String()),
+		zap.String("span_id", spanCtx.SpanID().String()),
+		zap.String("layer", "controller"),
+		zap.String("book_id", req.GetId()),
+	)
+
+	log.Info("start GetBookInfo")
 
 	if err := req.ValidateAll(); err != nil {
-		i.logger.Error("Invalid GetBook request", zap.Error(err))
+		log.Warn("invalid data", zap.Error(err))
+		span.RecordError(err)
 		return nil, status.Error(codes.InvalidArgument, err.Error())
 	}
 
 	book, err := i.booksUseCase.GetBook(ctx, req.GetId())
 	if err != nil {
-		i.logger.Error("Failed to get book", zap.Error(err))
-		return nil, i.ConvertErr(err)
+		return nil, i.handleError(span, err, "GetBookInfo")
 	}
+
+	log.Info("successfully finished GetBookInfo")
 
 	return &library.GetBookInfoResponse{
 		Book: &library.Book{

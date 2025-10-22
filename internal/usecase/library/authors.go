@@ -3,8 +3,9 @@ package library
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 
-	"go.uber.org/zap"
+	"go.opentelemetry.io/otel/trace"
 
 	"github.com/project/library/internal/entity"
 	"github.com/project/library/internal/usecase/repository"
@@ -14,41 +15,36 @@ func (l *libraryImpl) RegisterAuthor(
 	ctx context.Context,
 	authorName string,
 ) (*entity.Author, error) {
+	span := trace.SpanFromContext(ctx)
+	traceID := span.SpanContext().TraceID().String()
 	var author *entity.Author
 
 	err := l.transactor.WithTx(ctx, func(ctx context.Context) error {
-		l.logger.Info("Transaction started for RegisterAuthor")
-
 		var txErr error
 		author, txErr = l.authorRepository.RegisterAuthor(ctx, &entity.Author{
 			Name: authorName,
 		})
 		if txErr != nil {
-			l.logger.Error("Error adding author to repository:",
-				zap.Error(txErr))
 			return txErr
 		}
 
 		serialized, txErr := json.Marshal(author)
 		if txErr != nil {
-			l.logger.Error("Error serializing author data")
+			span.RecordError(fmt.Errorf("error serializing author: %w", txErr))
 			return txErr
 		}
 
 		idempotencyKey := repository.OutboxKindAuthor.String() + "_" + author.ID
 		txErr = l.outboxRepository.SendMessage(
-			ctx, idempotencyKey, repository.OutboxKindAuthor, serialized)
+			ctx, idempotencyKey, repository.OutboxKindAuthor, serialized, traceID)
 		if txErr != nil {
-			l.logger.Error("Error sending message to outbox",
-				zap.Error(txErr))
 			return txErr
 		}
 
 		return nil
 	})
+
 	if err != nil {
-		l.logger.Error("Failed to register author",
-			zap.Error(err))
 		return nil, err
 	}
 

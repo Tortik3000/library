@@ -83,8 +83,13 @@ func TestRegisterAuthor(t *testing.T) {
 				Return(tt.repositoryRerunAuthor, tt.repositoryErr)
 
 			if tt.repositoryErr == nil {
-				mockOutboxRepo.EXPECT().SendMessage(ctx, idempotencyKey,
-					repository.OutboxKindAuthor, serialized).Return(tt.outboxErr)
+				mockOutboxRepo.EXPECT().SendMessage(
+					ctx,
+					idempotencyKey,
+					repository.OutboxKindAuthor,
+					serialized,
+					gomock.Any(),
+				).Return(tt.outboxErr)
 			}
 			var (
 				resultAuthor *entity.Author

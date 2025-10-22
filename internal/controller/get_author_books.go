@@ -1,8 +1,8 @@
 package controller
 
 import (
-	"context"
-
+	"go.opentelemetry.io/otel/attribute"
+	"go.opentelemetry.io/otel/trace"
 	"go.uber.org/zap"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
@@ -15,23 +15,34 @@ func (i *impl) GetAuthorBooks(
 	req *library.GetAuthorBooksRequest,
 	server library.Library_GetAuthorBooksServer,
 ) error {
-	i.logger.Info("Received GetAuthorBooks request",
-		zap.String("author Id", req.GetAuthorId()))
+	span := trace.SpanFromContext(server.Context())
+	spanCtx := span.SpanContext()
+	span.SetAttributes(attribute.String("author.id", req.GetAuthorId()))
+
+	defer span.End()
+
+	log := i.logger.With(
+		zap.String("trace_id", spanCtx.TraceID().String()),
+		zap.String("span_id", spanCtx.SpanID().String()),
+		zap.String("layer", "controller"),
+		zap.String("author_id", req.GetAuthorId()),
+	)
+
+	log.Info("start GetAuthorBooks")
 
 	if err := req.ValidateAll(); err != nil {
-		i.logger.Error("Invalid GetAuthorBooks request", zap.Error(err))
+		log.Warn("invalid data", zap.Error(err))
+		span.RecordError(err)
 		return status.Error(codes.InvalidArgument, err.Error())
 	}
 
-	books, err := i.authorUseCase.GetAuthorBooks(
-		context.Background(), req.GetAuthorId())
+	books, err := i.authorUseCase.GetAuthorBooks(server.Context(), req.GetAuthorId())
 	if err != nil {
-		i.logger.Error("Failed to get author books", zap.Error(err))
-		return i.ConvertErr(err)
+		return i.handleError(span, err, "GetAuthorBooks")
 	}
 
 	for _, book := range books {
-		err := server.Send(&library.Book{
+		err = server.Send(&library.Book{
 			Id:        book.ID,
 			Name:      book.Name,
 			AuthorId:  book.AuthorIDs,
@@ -39,9 +50,16 @@ func (i *impl) GetAuthorBooks(
 			UpdatedAt: timestamppb.New(book.UpdatedAt),
 		})
 		if err != nil {
+			log.Error("failed to send book in stream",
+				zap.Error(err),
+				zap.String("book_id", book.ID),
+			)
+			span.RecordError(err)
 			return err
 		}
 	}
+
+	log.Info("successfully finished GetAuthorBooks")
 
 	return nil
 }

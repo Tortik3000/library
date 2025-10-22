@@ -3,6 +3,8 @@ package controller
 import (
 	"context"
 
+	"go.opentelemetry.io/otel/attribute"
+	"go.opentelemetry.io/otel/trace"
 	"go.uber.org/zap"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
@@ -14,20 +16,33 @@ func (i *impl) ChangeAuthorInfo(
 	ctx context.Context,
 	req *library.ChangeAuthorInfoRequest,
 ) (*library.ChangeAuthorInfoResponse, error) {
-	i.logger.Info("Received ChangeAuthor request",
-		zap.String("new author name", req.GetName()),
-		zap.String("author ID", req.GetId()))
+	span := trace.SpanFromContext(ctx)
+	spanCtx := span.SpanContext()
+	span.SetAttributes(attribute.String("author_id", req.GetId()))
+
+	defer span.End()
+
+	log := i.logger.With(
+		zap.String("trace_id", spanCtx.TraceID().String()),
+		zap.String("span_id", spanCtx.SpanID().String()),
+		zap.String("layer", "controller"),
+		zap.String("author_id", req.GetId()),
+	)
+
+	log.Info("start ChangeAuthorInfo")
 
 	if err := req.ValidateAll(); err != nil {
-		i.logger.Error("Invalid ChangeAuthor request", zap.Error(err))
+		log.Warn("invalid data", zap.Error(err))
+		span.RecordError(err)
 		return nil, status.Error(codes.InvalidArgument, err.Error())
 	}
 
 	err := i.authorUseCase.ChangeAuthor(ctx, req.GetId(), req.GetName())
 	if err != nil {
-		i.logger.Error("Failed to change author", zap.Error(err))
-		return nil, i.ConvertErr(err)
+		return nil, i.handleError(span, err, "ChangeAuthorInfo")
 	}
+
+	log.Info("successfully finished ChangeAuthorInfo")
 
 	return &library.ChangeAuthorInfoResponse{}, nil
 }

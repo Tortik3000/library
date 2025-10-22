@@ -1,7 +1,6 @@
 package controller
 
 import (
-	"context"
 	"testing"
 
 	"github.com/google/uuid"
@@ -19,11 +18,8 @@ import (
 
 func Test_ChangeAuthorInfo(t *testing.T) {
 	t.Parallel()
-	ctrl := gomock.NewController(t)
-	ctx := t.Context()
 
 	type args struct {
-		ctx context.Context
 		req *library.ChangeAuthorInfoRequest
 	}
 
@@ -35,43 +31,40 @@ func Test_ChangeAuthorInfo(t *testing.T) {
 		mocksUsed   bool
 	}{
 		{
-			"change author info",
-			args{ctx,
-				&library.ChangeAuthorInfoRequest{
+			name: "change author info",
+			args: args{
+				req: &library.ChangeAuthorInfoRequest{
 					Id:   uuid.NewString(),
 					Name: "New Name",
 				},
 			},
-			codes.OK,
-			nil,
-			true,
+			wantErrCode: codes.OK,
+			wantErr:     nil,
+			mocksUsed:   true,
 		},
-
 		{
-			"change author info | with err",
-			args{ctx,
-				&library.ChangeAuthorInfoRequest{
+			name: "change author info | with err",
+			args: args{
+				req: &library.ChangeAuthorInfoRequest{
 					Id:   uuid.NewString(),
 					Name: "New Name",
 				},
 			},
-			codes.NotFound,
-			entity.ErrAuthorNotFound,
-			true,
+			wantErrCode: codes.NotFound,
+			wantErr:     entity.ErrAuthorNotFound,
+			mocksUsed:   true,
 		},
-
 		{
-			"change author info | with invalid name",
-			args{
-				ctx,
-				&library.ChangeAuthorInfoRequest{
+			name: "change author info | with invalid name",
+			args: args{
+				req: &library.ChangeAuthorInfoRequest{
 					Id:   uuid.NewString(),
 					Name: "",
 				},
 			},
-			codes.InvalidArgument,
-			status.Error(codes.InvalidArgument, "error"),
-			false,
+			wantErrCode: codes.InvalidArgument,
+			wantErr:     status.Error(codes.InvalidArgument, "error"),
+			mocksUsed:   false,
 		},
 	}
 
@@ -79,18 +72,21 @@ func Test_ChangeAuthorInfo(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			t.Parallel()
 
+			ctrl := gomock.NewController(t)
+			t.Cleanup(ctrl.Finish)
+
 			logger, _ := zap.NewProduction()
 			authorUseCase := mocks.NewMockAuthorUseCase(ctrl)
 			bookUseCase := mocks.NewMockBooksUseCase(ctrl)
 			service := controller.New(logger, bookUseCase, authorUseCase)
+			ctx := t.Context()
 
 			if tt.mocksUsed {
 				authorUseCase.EXPECT().ChangeAuthor(ctx, tt.args.req.GetId(), tt.args.req.GetName()).
 					Return(tt.wantErr)
 			}
 
-			_, err := service.ChangeAuthorInfo(tt.args.ctx, tt.args.req)
-
+			_, err := service.ChangeAuthorInfo(ctx, tt.args.req)
 			testutils.CheckError(t, err, tt.wantErrCode)
 		})
 	}

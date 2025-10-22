@@ -3,6 +3,8 @@ package controller
 import (
 	"context"
 
+	"go.opentelemetry.io/otel/attribute"
+	"go.opentelemetry.io/otel/trace"
 	"go.uber.org/zap"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
@@ -15,20 +17,33 @@ func (i *impl) AddBook(
 	ctx context.Context,
 	req *library.AddBookRequest,
 ) (*library.AddBookResponse, error) {
-	i.logger.Info("Received AddBook request",
-		zap.String("book name", req.GetName()),
-		zap.Strings("author IDs", req.GetAuthorId()))
+	span := trace.SpanFromContext(ctx)
+	spanCtx := span.SpanContext()
+	defer span.End()
+
+	log := i.logger.With(
+		zap.String("layer", "controller"),
+		zap.String("span_id", spanCtx.SpanID().String()),
+		zap.String("trace_id", spanCtx.TraceID().String()),
+	)
+
+	log.Info("start addBook",
+		zap.String("book_name", req.GetName()),
+	)
 
 	if err := req.ValidateAll(); err != nil {
-		i.logger.Error("Invalid AddBook request", zap.Error(err))
+		log.Warn("invalid data", zap.Error(err))
+		span.RecordError(err)
 		return nil, status.Error(codes.InvalidArgument, err.Error())
 	}
 
 	book, err := i.booksUseCase.AddBook(ctx, req.GetName(), req.GetAuthorId())
 	if err != nil {
-		i.logger.Error("Failed to add book", zap.Error(err))
-		return nil, i.ConvertErr(err)
+		return nil, i.handleError(span, err, "AddBook")
 	}
+
+	log.Info("successfully finished AddBook", zap.String("book_id", book.ID))
+	span.SetAttributes(attribute.String("book.id", book.ID))
 
 	return &library.AddBookResponse{
 		Book: &library.Book{

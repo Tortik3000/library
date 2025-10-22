@@ -19,10 +19,7 @@ import (
 
 func Test_GetBookInfo(t *testing.T) {
 	t.Parallel()
-	ctrl := gomock.NewController(t)
-	ctx := t.Context()
 
-	bookID := uuid.NewString()
 	tests := []struct {
 		name        string
 		req         *library.GetBookInfoRequest
@@ -34,10 +31,10 @@ func Test_GetBookInfo(t *testing.T) {
 		{
 			name: "get book info",
 			req: &library.GetBookInfoRequest{
-				Id: bookID,
+				Id: uuid.NewString(),
 			},
 			want: &entity.Book{
-				ID:        bookID,
+				ID:        uuid.NewString(),
 				Name:      "Book Name",
 				AuthorIDs: []string{uuid.NewString()},
 			},
@@ -60,6 +57,7 @@ func Test_GetBookInfo(t *testing.T) {
 			},
 			wantErrCode: codes.InvalidArgument,
 			wantErr:     status.Error(codes.InvalidArgument, "err"),
+			mocksUsed:   false,
 		},
 	}
 
@@ -67,10 +65,14 @@ func Test_GetBookInfo(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			t.Parallel()
 
+			ctrl := gomock.NewController(t)
+			t.Cleanup(ctrl.Finish)
+
 			logger, _ := zap.NewProduction()
 			authorUseCase := mocks.NewMockAuthorUseCase(ctrl)
 			bookUseCase := mocks.NewMockBooksUseCase(ctrl)
 			service := controller.New(logger, bookUseCase, authorUseCase)
+			ctx := t.Context()
 
 			if tt.mocksUsed {
 				bookUseCase.EXPECT().GetBook(ctx, tt.req.GetId()).Return(tt.want, tt.wantErr)

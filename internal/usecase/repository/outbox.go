@@ -6,6 +6,7 @@ import (
 	"time"
 
 	"github.com/jackc/pgx/v5"
+	"github.com/project/library/internal/metrics"
 	"go.uber.org/zap"
 )
 
@@ -28,22 +29,25 @@ func (o *outboxRepository) SendMessage(
 	idempotencyKey string,
 	kind OutboxKind,
 	message []byte,
+	traceID string,
 ) error {
 	const query = `
-INSERT INTO outbox (idempotency_key, data, status, kind)
-VALUES($1, $2, 'CREATED', $3)
+INSERT INTO outbox (idempotency_key, data, status, kind, trace_id)
+VALUES($1, $2, 'CREATED', $3, $4)
 ON CONFLICT (idempotency_key) DO NOTHING`
 
 	var err error
 	if tx, txErr := extractTx(ctx); txErr == nil {
-		_, err = tx.Exec(ctx, query, idempotencyKey, message, kind)
+		_, err = tx.Exec(ctx, query, idempotencyKey, message, kind, traceID)
 	} else {
-		_, err = o.db.Exec(ctx, query, idempotencyKey, message, kind)
+		_, err = o.db.Exec(ctx, query, idempotencyKey, message, kind, traceID)
 	}
 
 	if err != nil {
 		return err
 	}
+
+	metrics.OutboxTasksCreated.WithLabelValues(kind.String()).Inc()
 
 	return nil
 }
@@ -65,7 +69,7 @@ WHERE idempotency_key IN (
     LIMIT $2
     FOR UPDATE SKIP LOCKED
 	)
-	RETURNING idempotency_key, data, kind;`
+	RETURNING idempotency_key, data, kind, trace_id;`
 
 	interval := fmt.Sprintf("%d ms", inProgressTTL.Milliseconds())
 	var (
@@ -91,8 +95,9 @@ WHERE idempotency_key IN (
 		var key string
 		var rawData []byte
 		var kind OutboxKind
+		var traceID string
 
-		if err := rows.Scan(&key, &rawData, &kind); err != nil {
+		if err := rows.Scan(&key, &rawData, &kind, &traceID); err != nil {
 			return nil, err
 		}
 
@@ -100,6 +105,7 @@ WHERE idempotency_key IN (
 			IdempotencyKey: key,
 			RawData:        rawData,
 			Kind:           kind,
+			TraceID:        traceID,
 		})
 	}
 
