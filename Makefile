@@ -11,6 +11,7 @@ UNAME_P := $(shell uname -p)
 
 ARCH :=
 
+DOCKER_INSTALL_CMD = apt update && apt install -y protobuf-compiler
 ifeq ($(UNAME_S),Linux)
     INSTALL_CMD = sudo apt update && sudo apt install -y protobuf-compiler
     ARCH = linux-x86_64
@@ -26,7 +27,7 @@ ifeq ($(UNAME_S),Darwin)
     endif
 endif
 
-all: generate lint test
+all: generate lint test build
 
 .PHONY: lint
 lint:
@@ -76,10 +77,13 @@ update:
 .install-protoc:
 	$(INSTALL_CMD)
 
-bin-deps: .bin-deps
+.docker-install-protoc:
+	$(DOCKER_INSTALL_CMD)
+
+bin-deps: .bin-deps .install-protoc
 
 .bin-deps: export GOBIN := $(LOCAL_BIN)
-.bin-deps: .create-bin .install-protoc
+.bin-deps: .create-bin
 	GOBIN=$(LOCAL_BIN) go install github.com/golangci/golangci-lint/cmd/golangci-lint@v1.64.5 && \
 	GOBIN=$(LOCAL_BIN) go install github.com/rakyll/gotest@v0.0.6 && \
 	GOBIN=$(LOCAL_BIN) go install go.uber.org/mock/mockgen@latest && \
@@ -97,6 +101,8 @@ bin-deps: .bin-deps
 	mkdir -p ./bin
 
 generate: bin-deps .generate
+docker-generate: .bin-deps .docker-install-protoc .generate
+
 fast-generate: .generate
 
 .generate:
