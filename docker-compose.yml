@@ -81,6 +81,13 @@ services:
       - "9090:9090"
     networks:
       - internal
+    healthcheck:
+      test: [ "CMD", "wget", "--spider", "http://localhost:9090/-/healthy" ]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+      start_period: 30s
+
 
   grafana:
     image: grafana/grafana
@@ -89,23 +96,16 @@ services:
     volumes:
       - grafana-storage:/var/lib/grafana
       - ./infra/grafana/datasources.yml:/etc/grafana/provisioning/datasources/datasources.yml
+      - ./infra/grafana/dashboards/dashboards.yml:/etc/grafana/provisioning/dashboards/dashboards.yml
+      - ./infra/grafana/dashboards/:/etc/grafana/provisioning/dashboards/
     networks:
       - internal
-
-#
-#grafana:
-#  image: grafana/grafana
-#  ports:
-#    - "3000:3000"
-#  volumes:
-#    - grafana-storage:/var/lib/grafana
-#    - ./infra/grafana/datasources.yml:/etc/grafana/provisioning/datasources/datasources.yml
-#    - ./infra/grafana/dashboards/dashboards.yml:/etc/grafana/provisioning/dashboards/dashboards.yml
-#    - ./infra/grafana/dashboards/:/etc/grafana/provisioning/dashboards/
-#  networks:
-#    - internal
-#  environment:
-#    - GF_SECURITY_ADMIN_PASSWORD=admin
+    depends_on:
+      prometheus:
+        condition: service_healthy
+    environment:
+      GF_SECURITY_ADMIN_PASSWORD: admin
+      DS_PROMETHEUS: "${DS_PROMETHEUS}"
 
   loki:
     image: grafana/loki:2.9.2

@@ -1,14 +1,5 @@
 {
-  "__inputs": [
-    {
-      "name": "DS_PROMETHEUS",
-      "label": "Prometheus",
-      "description": "",
-      "type": "datasource",
-      "pluginId": "prometheus",
-      "pluginName": "Prometheus"
-    }
-  ],
+  "__inputs": [],
   "__elements": {},
   "__requires": [
     {
@@ -62,7 +53,7 @@
     {
       "datasource": {
         "type": "prometheus",
-        "uid": "${DS_PROMETHEUS}"
+        "uid": "P7847DFF4E1A49A3A"
       },
       "description": "Общее количество созданных задач в Outbox по каждому типу",
       "fieldConfig": {
@@ -139,7 +130,7 @@
         {
           "datasource": {
             "type": "prometheus",
-            "uid": "${DS_PROMETHEUS}"
+            "uid": "P7847DFF4E1A49A3A"
           },
           "editorMode": "builder",
           "expr": "sum by (kind) (library_service_outbox_tasks_created_total)",
@@ -154,7 +145,7 @@
     {
       "datasource": {
         "type": "prometheus",
-        "uid": "${DS_PROMETHEUS}"
+        "uid": "P7847DFF4E1A49A3A"
       },
       "description": "Скорость обработки задач в Outbox (задачи/секунду)",
       "fieldConfig": {
@@ -231,7 +222,7 @@
         {
           "datasource": {
             "type": "prometheus",
-            "uid": "${DS_PROMETHEUS}"
+            "uid": "P7847DFF4E1A49A3A"
           },
           "editorMode": "builder",
           "expr": "sum by (kind) (rate(library_service_outbox_tasks_processed_total[5m]))",
@@ -246,7 +237,7 @@
     {
       "datasource": {
         "type": "prometheus",
-        "uid": "${DS_PROMETHEUS}"
+        "uid": "P7847DFF4E1A49A3A"
       },
       "description": "Процент неуспешных задач от общего числа обработанных",
       "fieldConfig": {
@@ -328,7 +319,7 @@
         {
           "datasource": {
             "type": "prometheus",
-            "uid": "${DS_PROMETHEUS}"
+            "uid": "P7847DFF4E1A49A3A"
           },
           "editorMode": "builder",
           "expr": "(sum by (kind) (rate(library_service_outbox_tasks_failed_total[5m])) / sum by (kind) (rate(library_service_outbox_tasks_processed_total[5m]))) * 100",
@@ -344,7 +335,7 @@
     {
       "datasource": {
         "type": "prometheus",
-        "uid": "${DS_PROMETHEUS}"
+        "uid": "P7847DFF4E1A49A3A"
       },
       "description": "Время обработки задач (95-й и 99-й перцентили)",
       "fieldConfig": {
@@ -422,7 +413,7 @@
         {
           "datasource": {
             "type": "prometheus",
-            "uid": "${DS_PROMETHEUS}"
+            "uid": "P7847DFF4E1A49A3A"
           },
           "editorMode": "builder",
           "expr": "histogram_quantile(0.95, sum by (le, kind) (rate(library_service_outbox_task_processing_duration_seconds_bucket[5m])))",
@@ -433,7 +424,7 @@
         {
           "datasource": {
             "type": "prometheus",
-            "uid": "${DS_PROMETHEUS}"
+            "uid": "P7847DFF4E1A49A3A"
           },
           "editorMode": "builder",
           "expr": "histogram_quantile(0.99, sum by (le, kind) (rate(library_service_outbox_task_processing_duration_seconds_bucket[5m])))",
@@ -449,7 +440,7 @@
     {
       "datasource": {
         "type": "prometheus",
-        "uid": "${DS_PROMETHEUS}"
+        "uid": "P7847DFF4E1A49A3A"
       },
       "description": "Количество активных горутин",
       "fieldConfig": {
@@ -526,7 +517,7 @@
         {
           "datasource": {
             "type": "prometheus",
-            "uid": "${DS_PROMETHEUS}"
+            "uid": "P7847DFF4E1A49A3A"
           },
           "editorMode": "builder",
           "expr": "go_goroutines",
@@ -541,7 +532,7 @@
     {
       "datasource": {
         "type": "prometheus",
-        "uid": "${DS_PROMETHEUS}"
+        "uid": "P7847DFF4E1A49A3A"
       },
       "description": "Используемая heap память",
       "fieldConfig": {
@@ -618,7 +609,7 @@
         {
           "datasource": {
             "type": "prometheus",
-            "uid": "${DS_PROMETHEUS}"
+            "uid": "P7847DFF4E1A49A3A"
           },
           "editorMode": "builder",
           "expr": "go_memstats_heap_inuse_bytes",
@@ -633,7 +624,7 @@
     {
       "datasource": {
         "type": "prometheus",
-        "uid": "${DS_PROMETHEUS}"
+        "uid": "P7847DFF4E1A49A3A"
       },
       "description": "Запросов в секунду по gRPC эндпоинтам",
       "fieldConfig": {
@@ -710,7 +701,7 @@
         {
           "datasource": {
             "type": "prometheus",
-            "uid": "${DS_PROMETHEUS}"
+            "uid": "P7847DFF4E1A49A3A"
           },
           "editorMode": "builder",
           "expr": "sum by (method) (rate(library_service_grpc_requests_total[5m]))",
@@ -725,7 +716,7 @@
     {
       "datasource": {
         "type": "prometheus",
-        "uid": "${DS_PROMETHEUS}"
+        "uid": "P7847DFF4E1A49A3A"
       },
       "description": "Время обработки gRPC запросов (95-й перцентиль)",
       "fieldConfig": {
@@ -803,7 +794,7 @@
         {
           "datasource": {
             "type": "prometheus",
-            "uid": "${DS_PROMETHEUS}"
+            "uid": "P7847DFF4E1A49A3A"
           },
           "editorMode": "builder",
           "expr": "histogram_quantile(0.95, sum by (le, method) (rate(library_service_grpc_request_duration_seconds_bucket[5m])))",
@@ -818,7 +809,7 @@
     {
       "datasource": {
         "type": "prometheus",
-        "uid": "${DS_PROMETHEUS}"
+        "uid": "P7847DFF4E1A49A3A"
       },
       "description": "Количество записей в таблицах базы данных",
       "fieldConfig": {
@@ -895,7 +886,7 @@
         {
           "datasource": {
             "type": "prometheus",
-            "uid": "${DS_PROMETHEUS}"
+            "uid": "P7847DFF4E1A49A3A"
           },
           "editorMode": "builder",
           "expr": "library_service_db_table_num_rows",
@@ -910,7 +901,7 @@
     {
       "datasource": {
         "type": "prometheus",
-        "uid": "${DS_PROMETHEUS}"
+        "uid": "P7847DFF4E1A49A3A"
       },
       "description": "Скорость вставки записей в таблицы (записей/секунду)",
       "fieldConfig": {
@@ -987,7 +978,7 @@
         {
           "datasource": {
             "type": "prometheus",
-            "uid": "${DS_PROMETHEUS}"
+            "uid": "P7847DFF4E1A49A3A"
           },
           "editorMode": "builder",
           "expr": "sum by (table) (rate(library_service_db_table_insert_total[5m]))",
@@ -1002,7 +993,7 @@
     {
       "datasource": {
         "type": "prometheus",
-        "uid": "${DS_PROMETHEUS}"
+        "uid": "P7847DFF4E1A49A3A"
       },
       "description": "Latency операций с базой данных (95-й перцентиль)",
       "fieldConfig": {
@@ -1080,7 +1071,7 @@
         {
           "datasource": {
             "type": "prometheus",
-            "uid": "${DS_PROMETHEUS}"
+            "uid": "P7847DFF4E1A49A3A"
           },
           "editorMode": "builder",
           "expr": "histogram_quantile(0.95, sum by (le, operation) (rate(db_query_latency_seconds_bucket[5m])))",
@@ -1108,7 +1099,7 @@
         },
         "datasource": {
           "type": "prometheus",
-          "uid": "${DS_PROMETHEUS}"
+          "uid": "P7847DFF4E1A49A3A"
         },
         "definition": "label_values(library_service_outbox_tasks_created_total, kind)",
         "hide": 0,
@@ -1134,7 +1125,7 @@
         },
         "datasource": {
           "type": "prometheus",
-          "uid": "${DS_PROMETHEUS}"
+          "uid": "P7847DFF4E1A49A3A"
         },
         "definition": "label_values(library_service_grpc_requests_total, method)",
         "hide": 0,
@@ -1160,7 +1151,7 @@
         },
         "datasource": {
           "type": "prometheus",
-          "uid": "${DS_PROMETHEUS}"
+          "uid": "P7847DFF4E1A49A3A"
         },
         "definition": "label_values(library_service_db_table_num_rows, table)",
         "hide": 0,
