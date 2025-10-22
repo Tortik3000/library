@@ -41,6 +41,7 @@
 - **Профилирование**: [Pyroscope](https://grafana.com/oss/pyroscope/)
 
 ### Дополнительные инструменты
+- **Генерация кода**: [easyp](https://github.com/easyp-tech/easyp)
 - **Валидация**: [protoc-gen-validate](https://github.com/bufbuild/protoc-gen-validate)
 - **Логирование (код)**: [logrus](https://github.com/sirupsen/logrus)
 - **Контейнеризация**: Docker, Docker Compose
