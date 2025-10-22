@@ -1,7 +1,7 @@
 import http from 'k6/http';
 import { randomItem } from 'https://jslib.k6.io/k6-utils/1.4.0/index.js';
 
-const BASE = __ENV.BASE_URL || 'http://localhost:50052';
+const BASE = __ENV.BASE_URL || `http://localhost:8080`;
 const hdrs = { headers: { 'Content-Type': 'application/json' } };
 
 function randomNum() {
