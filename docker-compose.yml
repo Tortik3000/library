@@ -92,6 +92,21 @@ services:
     networks:
       - internal
 
+#
+#grafana:
+#  image: grafana/grafana
+#  ports:
+#    - "3000:3000"
+#  volumes:
+#    - grafana-storage:/var/lib/grafana
+#    - ./infra/grafana/datasources.yml:/etc/grafana/provisioning/datasources/datasources.yml
+#    - ./infra/grafana/dashboards/dashboards.yml:/etc/grafana/provisioning/dashboards/dashboards.yml
+#    - ./infra/grafana/dashboards/:/etc/grafana/provisioning/dashboards/
+#  networks:
+#    - internal
+#  environment:
+#    - GF_SECURITY_ADMIN_PASSWORD=admin
+
   loki:
     image: grafana/loki:2.9.2
     ports:

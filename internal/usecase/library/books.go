@@ -5,7 +5,6 @@ import (
 	"encoding/json"
 	"fmt"
 
-	"go.opentelemetry.io/otel/attribute"
 	"go.opentelemetry.io/otel/trace"
 
 	"github.com/project/library/internal/entity"
@@ -29,7 +28,6 @@ func (l *libraryImpl) AddBook(
 			AuthorIDs: authorIDs,
 		})
 		if txErr != nil {
-			span.RecordError(fmt.Errorf("error adding book to repository: %w", txErr))
 			return txErr
 		}
 
@@ -43,7 +41,6 @@ func (l *libraryImpl) AddBook(
 		txErr = l.outboxRepository.SendMessage(
 			ctx, idempotencyKey, repository.OutboxKindBook, serialized, traceID)
 		if txErr != nil {
-			span.RecordError(fmt.Errorf("error sending message to outbox: %w", txErr))
 			return txErr
 		}
 
@@ -51,11 +48,8 @@ func (l *libraryImpl) AddBook(
 	})
 
 	if err != nil {
-		span.RecordError(fmt.Errorf("error adding book to repository: %w", err))
 		return nil, err
 	}
-
-	span.SetAttributes(attribute.String("book.id", book.ID))
 
 	return book, nil
 }

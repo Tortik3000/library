@@ -9,6 +9,7 @@ import (
 
 	"github.com/grafana/pyroscope-go"
 	"github.com/jackc/pgx/v5/pgxpool"
+	metrics2 "github.com/project/library/internal/metrics"
 	"github.com/prometheus/client_golang/prometheus/promhttp"
 	"go.opentelemetry.io/otel"
 	"go.opentelemetry.io/otel/exporters/jaeger"
@@ -18,8 +19,6 @@ import (
 	"go.uber.org/zap"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/status"
-
-	"github.com/project/library/metrics"
 )
 
 func startTableMetricsCollector(ctx context.Context, db *pgxpool.Pool, tables []string, interval time.Duration) {
@@ -38,11 +37,11 @@ func startTableMetricsCollector(ctx context.Context, db *pgxpool.Pool, tables []
 				if err := row.Scan(&count); err != nil {
 					continue
 				}
-				metrics.DBTableRowsCount.WithLabelValues(table).Set(float64(count))
+				metrics2.DBTableRowsCount.WithLabelValues(table).Set(float64(count))
 
 				last, ok := lastRowCounts[table]
 				if ok && count > last {
-					metrics.DBTableInsertRate.WithLabelValues(table).Add(float64(count - last))
+					metrics2.DBTableInsertRate.WithLabelValues(table).Add(float64(count - last))
 				}
 				lastRowCounts[table] = count
 			}
@@ -133,8 +132,8 @@ func grpcMetricsInterceptor(
 		codeStr = st.Code().String()
 	}
 
-	metrics.GRPCRequestsTotal.WithLabelValues(serviceName, methodName, codeStr).Inc()
-	metrics.GRPCRequestDuration.WithLabelValues(serviceName, methodName).Observe(duration)
+	metrics2.GRPCRequestsTotal.WithLabelValues(serviceName, methodName, codeStr).Inc()
+	metrics2.GRPCRequestDuration.WithLabelValues(serviceName, methodName).Observe(duration)
 
 	return resp, err
 }

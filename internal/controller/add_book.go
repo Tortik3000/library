@@ -39,13 +39,11 @@ func (i *impl) AddBook(
 
 	book, err := i.booksUseCase.AddBook(ctx, req.GetName(), req.GetAuthorId())
 	if err != nil {
-		log.Warn("failed AddBook", zap.Error(err))
-		span.RecordError(err)
-		return nil, i.ConvertErr(err)
+		return nil, i.handleError(span, err, "AddBook")
 	}
 
 	log.Info("successfully finished AddBook", zap.String("book_id", book.ID))
-	span.SetAttributes(attribute.String("book_id", book.ID))
+	span.SetAttributes(attribute.String("book.id", book.ID))
 
 	return &library.AddBookResponse{
 		Book: &library.Book{

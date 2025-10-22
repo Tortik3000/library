@@ -18,7 +18,7 @@ func (i *impl) GetAuthorInfo(
 ) (*library.GetAuthorInfoResponse, error) {
 	span := trace.SpanFromContext(ctx)
 	spanCtx := span.SpanContext()
-	span.SetAttributes(attribute.String("author_id", req.GetId()))
+	span.SetAttributes(attribute.String("author.id", req.GetId()))
 	defer span.End()
 
 	log := i.logger.With(
@@ -38,9 +38,7 @@ func (i *impl) GetAuthorInfo(
 
 	author, err := i.authorUseCase.GetAuthorInfo(ctx, req.GetId())
 	if err != nil {
-		log.Warn("failed GetAuthorInfo", zap.Error(err))
-		span.RecordError(err)
-		return nil, i.ConvertErr(err)
+		return nil, i.handleError(span, err, "GetAuthorInfo")
 	}
 
 	log.Info("successfully finished GetAuthorInfo")

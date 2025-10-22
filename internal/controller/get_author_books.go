@@ -1,8 +1,6 @@
 package controller
 
 import (
-	"context"
-
 	"go.opentelemetry.io/otel/attribute"
 	"go.opentelemetry.io/otel/trace"
 	"go.uber.org/zap"
@@ -19,7 +17,7 @@ func (i *impl) GetAuthorBooks(
 ) error {
 	span := trace.SpanFromContext(server.Context())
 	spanCtx := span.SpanContext()
-	span.SetAttributes(attribute.String("author_id", req.GetAuthorId()))
+	span.SetAttributes(attribute.String("author.id", req.GetAuthorId()))
 
 	defer span.End()
 
@@ -38,12 +36,9 @@ func (i *impl) GetAuthorBooks(
 		return status.Error(codes.InvalidArgument, err.Error())
 	}
 
-	books, err := i.authorUseCase.GetAuthorBooks(
-		context.Background(), req.GetAuthorId())
+	books, err := i.authorUseCase.GetAuthorBooks(server.Context(), req.GetAuthorId())
 	if err != nil {
-		log.Warn("failed GetAuthorBooks", zap.Error(err))
-		span.RecordError(err)
-		return i.ConvertErr(err)
+		return i.handleError(span, err, "GetAuthorBooks")
 	}
 
 	for _, book := range books {
@@ -55,7 +50,10 @@ func (i *impl) GetAuthorBooks(
 			UpdatedAt: timestamppb.New(book.UpdatedAt),
 		})
 		if err != nil {
-			log.Warn("failed to insert record in stream", zap.Error(err))
+			log.Error("failed to send book in stream",
+				zap.Error(err),
+				zap.String("book_id", book.ID),
+			)
 			span.RecordError(err)
 			return err
 		}

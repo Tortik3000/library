@@ -18,7 +18,7 @@ func (i *impl) UpdateBook(
 ) (*library.UpdateBookResponse, error) {
 	span := trace.SpanFromContext(ctx)
 	spanCtx := span.SpanContext()
-	span.SetAttributes(attribute.String("book_id", req.GetId()))
+	span.SetAttributes(attribute.String("book.id", req.GetId()))
 
 	defer span.End()
 
@@ -38,9 +38,7 @@ func (i *impl) UpdateBook(
 	err := i.booksUseCase.UpdateBook(ctx, req.GetId(),
 		req.GetName(), req.GetAuthorIds())
 	if err != nil {
-		log.Warn("failed UpdateBook", zap.Error(err))
-		span.RecordError(err)
-		return nil, i.ConvertErr(err)
+		return nil, i.handleError(span, err, "UpdateBook")
 	}
 
 	log.Info("successfully finished UpdateBook")

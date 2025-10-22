@@ -35,13 +35,11 @@ func (i *impl) RegisterAuthor(
 
 	author, err := i.authorUseCase.RegisterAuthor(ctx, req.GetName())
 	if err != nil {
-		log.Warn("failed RegisterAuthor", zap.Error(err))
-		span.RecordError(err)
-		return nil, i.ConvertErr(err)
+		return nil, i.handleError(span, err, "RegisterAuthor")
 	}
 
 	log.Info("successfully finished RegisterAuthor", zap.String("author_id", author.ID))
-	span.SetAttributes(attribute.String("author_id", author.ID))
+	span.SetAttributes(attribute.String("author.id", author.ID))
 
 	return &library.RegisterAuthorResponse{
 		Id: author.ID,

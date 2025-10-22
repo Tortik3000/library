@@ -9,7 +9,7 @@ import (
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgconn"
-	"github.com/project/library/metrics"
+	"github.com/project/library/internal/metrics"
 	"go.opentelemetry.io/otel/trace"
 	"go.uber.org/zap"
 
@@ -48,16 +48,18 @@ func (p *postgresRepository) AddBook(
 	book *entity.Book,
 ) (respBook *entity.Book, txErr error) {
 	span := trace.SpanFromContext(ctx)
-	p.logger.Info("start to add book",
+
+	log := p.logger.With(
 		zap.String("layer", "postgres"),
 		zap.String("book_id", book.ID),
 		zap.String("trace_id", span.SpanContext().TraceID().String()),
+		zap.String("span_id", span.SpanContext().SpanID().String()),
 	)
+	log.Info("start AddBook")
 
 	tx, rollback, err := p.beginTx(ctx)
 	if err != nil {
-		span.RecordError(err)
-		return nil, err
+		return nil, mapPostgresError(err, err, span)
 	}
 	defer rollback(txErr)
 
@@ -74,21 +76,15 @@ RETURNING id, created_at, updated_at;
 	})
 
 	if err != nil {
-		span.RecordError(err)
-		return nil, err
+		return nil, mapPostgresError(err, err, span)
 	}
 	book.ID = id.String()
 
 	err = bulkInsertInAuthorBook(ctx, book.AuthorIDs, book.ID, tx)
 	if err != nil {
 		span.RecordError(err)
-		return nil, mapPostgresError(err, entity.ErrAuthorNotFound)
+		return nil, mapPostgresError(err, entity.ErrAuthorNotFound, span)
 	}
-
-	p.logger.Info("finish to add book",
-		zap.String("layer", "postgres"),
-		zap.String("trace_id", span.SpanContext().TraceID().String()),
-	)
 
 	return book, nil
 }
@@ -97,6 +93,16 @@ func (p *postgresRepository) GetBook(
 	ctx context.Context,
 	bookID string,
 ) (*entity.Book, error) {
+	span := trace.SpanFromContext(ctx)
+
+	log := p.logger.With(
+		zap.String("layer", "postgres"),
+		zap.String("book_id", bookID),
+		zap.String("trace_id", span.SpanContext().TraceID().String()),
+		zap.String("span_id", span.SpanContext().SpanID().String()),
+	)
+	log.Info("start GetBook")
+
 	const GetBook = `
 SELECT 
   book.id, 
@@ -122,10 +128,11 @@ GROUP BY
 	})
 
 	if err != nil {
-		return nil, mapPostgresError(err, entity.ErrBookNotFound)
+		return nil, mapPostgresError(err, entity.ErrBookNotFound, span)
 	}
 
 	book.AuthorIDs = convertUUIDsToStrings(authorIDs)
+
 	return &book, nil
 }
 
@@ -135,9 +142,19 @@ func (p *postgresRepository) UpdateBook(
 	newBookName string,
 	authorIDs []string,
 ) (txErr error) {
+	span := trace.SpanFromContext(ctx)
+
+	log := p.logger.With(
+		zap.String("layer", "postgres"),
+		zap.String("book_id", bookID),
+		zap.String("trace_id", span.SpanContext().TraceID().String()),
+		zap.String("span_id", span.SpanContext().SpanID().String()),
+	)
+	log.Info("start UpdateBook")
+
 	tx, rollback, err := p.beginTx(ctx)
 	if err != nil {
-		return err
+		return mapPostgresError(err, err, span)
 	}
 	defer rollback(txErr)
 
@@ -151,7 +168,7 @@ UPDATE book SET name = $1 WHERE id = $2;
 	})
 
 	if err != nil {
-		return err
+		return mapPostgresError(err, err, span)
 	}
 
 	const UpdateAuthorBooks = `
@@ -167,7 +184,7 @@ WHERE book_id = $2
 
 	_, err = tx.Exec(ctx, UpdateAuthorBooks, authorIDs, bookID)
 	if err != nil {
-		return mapPostgresError(err, entity.ErrAuthorNotFound)
+		return mapPostgresError(err, entity.ErrAuthorNotFound, span)
 	}
 
 	return nil
@@ -179,16 +196,17 @@ func (p *postgresRepository) RegisterAuthor(
 ) (respAuthor *entity.Author, txErr error) {
 	span := trace.SpanFromContext(ctx)
 
-	p.logger.Info("start to register author",
+	log := p.logger.With(
 		zap.String("layer", "postgres"),
 		zap.String("author_id", author.ID),
 		zap.String("trace_id", span.SpanContext().TraceID().String()),
+		zap.String("span_id", span.SpanContext().SpanID().String()),
 	)
+	log.Info("start RegisterAuthor")
 
 	tx, rollback, err := p.beginTx(ctx)
 	if err != nil {
-		span.RecordError(err)
-		return nil, err
+		return nil, mapPostgresError(err, err, span)
 	}
 	defer rollback(txErr)
 
@@ -203,15 +221,9 @@ RETURNING id;
 	})
 
 	if err != nil {
-		span.RecordError(err)
-		return nil, err
+		return nil, mapPostgresError(err, err, span)
 	}
 	author.ID = id.String()
-
-	p.logger.Info("finish to register author",
-		zap.String("layer", "postgres"),
-		zap.String("trace_id", span.SpanContext().TraceID().String()),
-	)
 
 	return author, nil
 }
@@ -220,6 +232,16 @@ func (p *postgresRepository) GetAuthorInfo(
 	ctx context.Context,
 	authorID string,
 ) (*entity.Author, error) {
+	span := trace.SpanFromContext(ctx)
+
+	log := p.logger.With(
+		zap.String("layer", "postgres"),
+		zap.String("author_id", authorID),
+		zap.String("trace_id", span.SpanContext().TraceID().String()),
+		zap.String("span_id", span.SpanContext().SpanID().String()),
+	)
+	log.Info("start GetAuthorInfo")
+
 	const GetQueryAuthor = `
 SELECT id, name
 FROM author
@@ -234,7 +256,7 @@ WHERE id = $1;
 	})
 
 	if err != nil {
-		return nil, mapPostgresError(err, entity.ErrAuthorNotFound)
+		return nil, mapPostgresError(err, entity.ErrAuthorNotFound, span)
 	}
 
 	return &author, nil
@@ -245,9 +267,19 @@ func (p *postgresRepository) ChangeAuthor(
 	authorID string,
 	newAuthorName string,
 ) (txErr error) {
+	span := trace.SpanFromContext(ctx)
+
+	log := p.logger.With(
+		zap.String("layer", "postgres"),
+		zap.String("author_id", authorID),
+		zap.String("trace_id", span.SpanContext().TraceID().String()),
+		zap.String("span_id", span.SpanContext().SpanID().String()),
+	)
+	log.Info("start ChangeAuthor")
+
 	tx, rollback, err := p.beginTx(ctx)
 	if err != nil {
-		return err
+		return mapPostgresError(err, err, span)
 	}
 	defer rollback(txErr)
 
@@ -260,7 +292,7 @@ UPDATE author SET name = $1 WHERE id = $2;
 	})
 
 	if err != nil {
-		return err
+		return mapPostgresError(err, err, span)
 	}
 
 	return nil
@@ -270,6 +302,15 @@ func (p *postgresRepository) GetAuthorBooks(
 	ctx context.Context,
 	authorID string,
 ) ([]*entity.Book, error) {
+	span := trace.SpanFromContext(ctx)
+
+	log := p.logger.With(
+		zap.String("layer", "postgres"),
+		zap.String("author_id", authorID),
+		zap.String("trace_id", span.SpanContext().TraceID().String()),
+		zap.String("span_id", span.SpanContext().SpanID().String()),
+	)
+	log.Info("start GetAuthorBooks")
 	const GetBooksWithAuthors = `
 SELECT
 	book.id,
@@ -293,7 +334,7 @@ GROUP BY
 
 	rows, err := p.db.Query(ctx, GetBooksWithAuthors, authorID)
 	if err != nil {
-		return nil, err
+		return nil, mapPostgresError(err, err, span)
 	}
 	defer rows.Close()
 
@@ -304,7 +345,7 @@ GROUP BY
 
 		if err = rows.Scan(&book.ID, &book.Name, &book.CreatedAt,
 			&book.UpdatedAt, &authorIDs); err != nil {
-			return nil, err
+			return nil, mapPostgresError(err, err, span)
 		}
 
 		book.AuthorIDs = convertUUIDsToStrings(authorIDs)
@@ -374,12 +415,17 @@ func convertUUIDsToStrings(uuids []uuid.UUID) []string {
 	return strs
 }
 
-func mapPostgresError(err error, notFoundErr error) error {
+func mapPostgresError(err error, notFoundErr error, span trace.Span) (returnErr error) {
+	defer func() {
+		span.RecordError(returnErr)
+	}()
+
 	if errors.Is(err, sql.ErrNoRows) {
 		return notFoundErr
 	}
 	if errors.As(err, &ErrForeignKeyViolation) {
 		return notFoundErr
 	}
+
 	return err
 }

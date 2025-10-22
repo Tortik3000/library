@@ -19,7 +19,7 @@ func (i *impl) GetBookInfo(
 ) (*library.GetBookInfoResponse, error) {
 	span := trace.SpanFromContext(ctx)
 	spanCtx := span.SpanContext()
-	span.SetAttributes(attribute.String("book_id", req.GetId()))
+	span.SetAttributes(attribute.String("book.id", req.GetId()))
 
 	defer span.End()
 
@@ -40,9 +40,7 @@ func (i *impl) GetBookInfo(
 
 	book, err := i.booksUseCase.GetBook(ctx, req.GetId())
 	if err != nil {
-		log.Warn("failed GetBookInfo", zap.Error(err))
-		span.RecordError(err)
-		return nil, i.ConvertErr(err)
+		return nil, i.handleError(span, err, "GetBookInfo")
 	}
 
 	log.Info("successfully finished GetBookInfo")

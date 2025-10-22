@@ -4,7 +4,7 @@ import (
 	"context"
 	"time"
 
-	"github.com/project/library/metrics"
+	"github.com/project/library/internal/metrics"
 	"go.opentelemetry.io/otel"
 	"go.opentelemetry.io/otel/attribute"
 	"go.opentelemetry.io/otel/trace"
@@ -81,8 +81,7 @@ func (o *outboxImpl) worker(
 				ctx, batchSize, inProgressTTL)
 
 			if err != nil {
-				log.Error("can not fetch messages from outbox",
-					zap.Error(err))
+				log.Error("can not fetch messages from outbox", zap.Error(err))
 				return err
 			}
 

@@ -39,9 +39,7 @@ func (i *impl) ChangeAuthorInfo(
 
 	err := i.authorUseCase.ChangeAuthor(ctx, req.GetId(), req.GetName())
 	if err != nil {
-		log.Warn("failed ChangeAuthorInfo", zap.Error(err))
-		span.RecordError(err)
-		return nil, i.ConvertErr(err)
+		return nil, i.handleError(span, err, "ChangeAuthorInfo")
 	}
 
 	log.Info("successfully finished ChangeAuthorInfo")

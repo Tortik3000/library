@@ -5,7 +5,6 @@ import (
 	"encoding/json"
 	"fmt"
 
-	"go.opentelemetry.io/otel/attribute"
 	"go.opentelemetry.io/otel/trace"
 
 	"github.com/project/library/internal/entity"
@@ -26,7 +25,6 @@ func (l *libraryImpl) RegisterAuthor(
 			Name: authorName,
 		})
 		if txErr != nil {
-			span.RecordError(fmt.Errorf("error register author to repostitory: %w", txErr))
 			return txErr
 		}
 
@@ -40,7 +38,6 @@ func (l *libraryImpl) RegisterAuthor(
 		txErr = l.outboxRepository.SendMessage(
 			ctx, idempotencyKey, repository.OutboxKindAuthor, serialized, traceID)
 		if txErr != nil {
-			span.RecordError(fmt.Errorf("error sending message to outbox: %w", txErr))
 			return txErr
 		}
 
@@ -48,11 +45,9 @@ func (l *libraryImpl) RegisterAuthor(
 	})
 
 	if err != nil {
-		span.RecordError(fmt.Errorf("error register author to repository: %w", err))
 		return nil, err
 	}
 
-	span.SetAttributes(attribute.String("author.id", author.ID))
 	return author, nil
 }
 

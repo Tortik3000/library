@@ -35,8 +35,7 @@ func (t transactor) WithTx(
 ) (txErr error) {
 	ctxWithTx, tx, err := injectTx(ctx, t.db)
 	if err != nil {
-		return fmt.Errorf(
-			"can not inject transaction, error: %w", err)
+		return fmt.Errorf("can not inject transaction, error: %w", err)
 	}
 
 	defer func() {
