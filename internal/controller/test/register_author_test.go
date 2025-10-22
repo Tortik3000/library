@@ -19,12 +19,6 @@ import (
 
 func Test_RegisterAuthor(t *testing.T) {
 	t.Parallel()
-	ctrl := gomock.NewController(t)
-	logger, _ := zap.NewProduction()
-	authorUseCase := mocks.NewMockAuthorUseCase(ctrl)
-	bookUseCase := mocks.NewMockBooksUseCase(ctrl)
-	service := controller.New(logger, bookUseCase, authorUseCase)
-	ctx := t.Context()
 
 	tests := []struct {
 		name        string
@@ -44,7 +38,7 @@ func Test_RegisterAuthor(t *testing.T) {
 				Name: "Author Name",
 			},
 			wantErrCode: codes.OK,
-			wantErr:     status.Error(codes.OK, "not error"),
+			wantErr:     nil,
 			mocksUsed:   true,
 		},
 		{
@@ -54,10 +48,10 @@ func Test_RegisterAuthor(t *testing.T) {
 			},
 			wantErrCode: codes.InvalidArgument,
 			wantErr:     status.Error(codes.InvalidArgument, "error"),
+			mocksUsed:   false,
 		},
-
 		{
-			name: "register author | invalid argument",
+			name: "register author | internal error",
 			req: &library.RegisterAuthorRequest{
 				Name: "name",
 			},
@@ -70,6 +64,16 @@ func Test_RegisterAuthor(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			t.Parallel()
+			
+			ctrl := gomock.NewController(t)
+			t.Cleanup(ctrl.Finish)
+
+			logger, _ := zap.NewProduction()
+			authorUseCase := mocks.NewMockAuthorUseCase(ctrl)
+			bookUseCase := mocks.NewMockBooksUseCase(ctrl)
+			service := controller.New(logger, bookUseCase, authorUseCase)
+			ctx := t.Context()
+
 			if tt.mocksUsed {
 				authorUseCase.EXPECT().RegisterAuthor(ctx, tt.req.GetName()).Return(tt.want, tt.wantErr)
 			}

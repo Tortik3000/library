@@ -78,7 +78,7 @@ services:
     volumes:
       - ./infra/prometheus.yml:/etc/prometheus/prometheus.yml
     ports:
-      - "9090:9090"
+      - "${PROMETHEUS_PORT}:${PROMETHEUS_PORT}"
     networks:
       - internal
     healthcheck:
@@ -92,7 +92,7 @@ services:
   grafana:
     image: grafana/grafana
     ports:
-      - "3000:3000"
+      - "${GRAFANA_PORT}:${GRAFANA_PORT}"
     volumes:
       - grafana-storage:/var/lib/grafana
       - ./infra/grafana/datasources.yml:/etc/grafana/provisioning/datasources/datasources.yml
@@ -110,7 +110,7 @@ services:
   loki:
     image: grafana/loki:2.9.2
     ports:
-      - "3100:3100"
+      - "${LOKI_PORT}:${LOKI_PORT}"
     command: -config.file=/etc/loki/local-config.yaml
     networks:
       - internal
@@ -127,7 +127,7 @@ services:
   pyroscope:
     image: grafana/pyroscope:latest
     ports:
-      - "4040:4040"
+      - "${PYROSCOPE_PORT}:${PYROSCOPE_PORT}"
     networks:
       - internal
 

@@ -2,7 +2,6 @@ package controller
 
 import (
 	"context"
-
 	"testing"
 
 	"github.com/google/uuid"
@@ -20,12 +19,6 @@ import (
 
 func Test_UpdateBook(t *testing.T) {
 	t.Parallel()
-	ctrl := gomock.NewController(t)
-	logger, _ := zap.NewProduction()
-	authorUseCase := mocks.NewMockAuthorUseCase(ctrl)
-	bookUseCase := mocks.NewMockBooksUseCase(ctrl)
-	service := controller.New(logger, bookUseCase, authorUseCase)
-	ctx := t.Context()
 
 	type args struct {
 		ctx context.Context
@@ -41,7 +34,7 @@ func Test_UpdateBook(t *testing.T) {
 		{
 			name: "successful update",
 			args: args{
-				ctx: ctx,
+				ctx: context.Background(), // Будет переопределен в каждом тесте
 				req: &library.UpdateBookRequest{
 					Id:        uuid.NewString(),
 					Name:      "New Book Name",
@@ -55,7 +48,7 @@ func Test_UpdateBook(t *testing.T) {
 		{
 			name: "invalid request",
 			args: args{
-				ctx: ctx,
+				ctx: context.Background(),
 				req: &library.UpdateBookRequest{
 					Id:        "1",
 					Name:      "name",
@@ -69,7 +62,7 @@ func Test_UpdateBook(t *testing.T) {
 		{
 			name: "book not found",
 			args: args{
-				ctx: ctx,
+				ctx: context.Background(),
 				req: &library.UpdateBookRequest{
 					Id:        uuid.NewString(),
 					Name:      "New Book Name",
@@ -85,6 +78,17 @@ func Test_UpdateBook(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			t.Parallel()
+			
+			ctrl := gomock.NewController(t)
+			t.Cleanup(ctrl.Finish)
+
+			logger, _ := zap.NewProduction()
+			authorUseCase := mocks.NewMockAuthorUseCase(ctrl)
+			bookUseCase := mocks.NewMockBooksUseCase(ctrl)
+			service := controller.New(logger, bookUseCase, authorUseCase)
+
+			ctx := t.Context()
+
 			if tt.mocksUsed {
 				bookUseCase.EXPECT().UpdateBook(ctx, tt.args.req.GetId(),
 					tt.args.req.GetName(), tt.args.req.GetAuthorIds()).

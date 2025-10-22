@@ -84,8 +84,13 @@ func TestAddBook(t *testing.T) {
 				Return(tt.repositoryRerunBook, tt.repositoryErr)
 
 			if tt.repositoryErr == nil {
-				mockOutboxRepo.EXPECT().SendMessage(ctx, idempotencyKey,
-					repository.OutboxKindBook, serialized).Return(tt.outboxErr)
+				mockOutboxRepo.EXPECT().SendMessage(
+					ctx,
+					idempotencyKey,
+					repository.OutboxKindBook,
+					serialized,
+					gomock.Any(),
+				).Return(tt.outboxErr)
 			}
 
 			resultBook, err := useCase.AddBook(ctx, book.Name, book.AuthorIDs)

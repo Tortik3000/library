@@ -19,6 +19,7 @@ func TestSendMassage(t *testing.T) {
 	idempotencyKey := "test-key"
 	kind := repository.OutboxKindBook
 	message := []byte("test-message")
+	traceID := "test-trace-id"
 
 	tests := []struct {
 		name    string
@@ -50,15 +51,15 @@ func TestSendMassage(t *testing.T) {
 
 			if tt.wantErr != nil {
 				mockDB.ExpectExec("INSERT INTO outbox").
-					WithArgs(idempotencyKey, message, kind).
+					WithArgs(idempotencyKey, message, kind, traceID).
 					WillReturnError(tt.wantErr)
 			} else {
 				mockDB.ExpectExec("INSERT INTO outbox").
-					WithArgs(idempotencyKey, message, kind).
+					WithArgs(idempotencyKey, message, kind, traceID).
 					WillReturnResult(pgxmock.NewResult("INSERT", 1))
 			}
 
-			err = outboxRepo.SendMessage(ctx, idempotencyKey, kind, message)
+			err = outboxRepo.SendMessage(ctx, idempotencyKey, kind, message, traceID)
 			if tt.wantErr != nil {
 				require.Error(t, err)
 			} else {
@@ -86,12 +87,22 @@ func TestGetMessages(t *testing.T) {
 			name:          "get messages",
 			batchSize:     2,
 			inProgressTTL: 5 * time.Second,
-			returnRows: pgxmock.NewRows([]string{"idempotency_key", "data", "kind"}).
-				AddRow("key1", []byte("message1"), repository.OutboxKindBook).
-				AddRow("key2", []byte("message2"), repository.OutboxKindBook),
+			returnRows: pgxmock.NewRows([]string{"idempotency_key", "data", "kind", "trace_id"}).
+				AddRow("key1", []byte("message1"), repository.OutboxKindBook, "trace1").
+				AddRow("key2", []byte("message2"), repository.OutboxKindBook, "trace2"),
 			expectedData: []repository.OutboxData{
-				{IdempotencyKey: "key1", RawData: []byte("message1"), Kind: repository.OutboxKindBook},
-				{IdempotencyKey: "key2", RawData: []byte("message2"), Kind: repository.OutboxKindBook},
+				{
+					IdempotencyKey: "key1",
+					RawData:        []byte("message1"),
+					Kind:           repository.OutboxKindBook,
+					TraceID:        "trace1",
+				},
+				{
+					IdempotencyKey: "key2",
+					RawData:        []byte("message2"),
+					Kind:           repository.OutboxKindBook,
+					TraceID:        "trace2",
+				},
 			},
 			wantErr: false,
 		},
@@ -108,9 +119,9 @@ func TestGetMessages(t *testing.T) {
 			name:          "get messages | scan error",
 			batchSize:     2,
 			inProgressTTL: 5 * time.Second,
-			returnRows: pgxmock.NewRows([]string{"idempotency_key", "data", "kind"}).
-				AddRow("key1", []byte("message1"), repository.OutboxKindBook).
-				AddRow("key2", nil, "1"),
+			returnRows: pgxmock.NewRows([]string{"idempotency_key", "data", "kind", "trace_id"}).
+				AddRow("key1", []byte("message1"), repository.OutboxKindBook, "trace1").
+				AddRow("key2", nil, "1", "trace2"),
 			expectedData: nil,
 			wantErr:      true,
 		},
