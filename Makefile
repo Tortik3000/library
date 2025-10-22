@@ -11,7 +11,6 @@ UNAME_P := $(shell uname -p)
 
 ARCH :=
 
-DOCKER_INSTALL_CMD = apt update && apt install -y protobuf-compiler
 ifeq ($(UNAME_S),Linux)
     INSTALL_CMD = sudo apt update && sudo apt install -y protobuf-compiler
     ARCH = linux-x86_64
@@ -77,9 +76,6 @@ update:
 .install-protoc:
 	$(INSTALL_CMD)
 
-.docker-install-protoc:
-	$(DOCKER_INSTALL_CMD)
-
 bin-deps: .bin-deps .install-protoc
 
 .bin-deps: export GOBIN := $(LOCAL_BIN)
@@ -101,7 +97,6 @@ bin-deps: .bin-deps .install-protoc
 	mkdir -p ./bin
 
 generate: bin-deps .generate
-docker-generate: .bin-deps .docker-install-protoc .generate
 
 fast-generate: .generate
 
